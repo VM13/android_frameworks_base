@@ -60,6 +60,9 @@ public class WifiConfiguration implements Parcelable {
     public static final String updateIdentiferVarName = "update_identifier";
     /** {@hide} */
     public static final int INVALID_NETWORK_ID = -1;
+    /** {@hide} */
+    public static final String SIMNumVarName = "sim_num";
+
 
     /**
      * Recognized key management schemes.
@@ -424,6 +427,12 @@ public class WifiConfiguration implements Parcelable {
      * Uid used by autoJoin
      */
     public String autoJoinBSSID;
+
+    /**
+      * @hide
+      * sim number selected
+      */
+    public int SIMNum;
 
     /**
      * @hide
@@ -929,6 +938,7 @@ public class WifiConfiguration implements Parcelable {
         mIpConfiguration = new IpConfiguration();
         lastUpdateUid = -1;
         creatorUid = -1;
+        SIMNum = 0;
     }
 
     /**
@@ -1086,6 +1096,10 @@ public class WifiConfiguration implements Parcelable {
         }
         sbuf.append('\n').append(" PSK: ");
         if (this.preSharedKey != null) {
+            sbuf.append('*');
+        }
+        sbuf.append('\n').append(" sim_num ");
+        if (this.SIMNum > 0 ) {
             sbuf.append('*');
         }
         sbuf.append("\nEnterprise config:\n");
@@ -1325,14 +1339,14 @@ public class WifiConfiguration implements Parcelable {
             key = FQDN + KeyMgmt.strings[KeyMgmt.WPA_EAP];
         } else {
             if (allowedKeyManagement.get(KeyMgmt.WPA_PSK)) {
-                key = SSID + KeyMgmt.strings[KeyMgmt.WPA_PSK];
+                key = SSID + "-" + KeyMgmt.strings[KeyMgmt.WPA_PSK];
             } else if (allowedKeyManagement.get(KeyMgmt.WPA_EAP) ||
                     allowedKeyManagement.get(KeyMgmt.IEEE8021X)) {
-                key = SSID + KeyMgmt.strings[KeyMgmt.WPA_EAP];
+                key = SSID + "-" + KeyMgmt.strings[KeyMgmt.WPA_EAP];
             } else if (wepKeys[0] != null) {
-                key = SSID + "WEP";
+                key = SSID + "-WEP";
             } else {
-                key = SSID + KeyMgmt.strings[KeyMgmt.NONE];
+                key = SSID + "-" + KeyMgmt.strings[KeyMgmt.NONE];
             }
             mCachedConfigKey = key;
         }
@@ -1354,17 +1368,16 @@ public class WifiConfiguration implements Parcelable {
 
         if (result.capabilities.contains("WEP")) {
             key = key + "-WEP";
-        }
-
-        if (result.capabilities.contains("PSK")) {
+        } else if (result.capabilities.contains("PSK")) {
             key = key + "-" + KeyMgmt.strings[KeyMgmt.WPA_PSK];
-        }
-
-        if (result.capabilities.contains("EAP")) {
+        } else if (result.capabilities.contains("EAP")||
+                   result.capabilities.contains("IEEE8021X")) {
             key = key + "-" + KeyMgmt.strings[KeyMgmt.WPA_EAP];
+        } else {
+            key = key +"-" + KeyMgmt.strings[KeyMgmt.NONE];
         }
 
-        return key;
+	return key;
     }
 
     /** @hide */
@@ -1522,6 +1535,7 @@ public class WifiConfiguration implements Parcelable {
             noInternetAccessExpected = source.noInternetAccessExpected;
             creationTime = source.creationTime;
             updateTime = source.updateTime;
+            SIMNum = source.SIMNum;
         }
     }
 
@@ -1601,6 +1615,7 @@ public class WifiConfiguration implements Parcelable {
         dest.writeInt(userApproved);
         dest.writeInt(numNoInternetAccessReports);
         dest.writeInt(noInternetAccessExpected ? 1 : 0);
+        dest.writeInt(SIMNum);
     }
 
     /** Implement the Parcelable interface {@hide} */
@@ -1677,6 +1692,7 @@ public class WifiConfiguration implements Parcelable {
                 config.userApproved = in.readInt();
                 config.numNoInternetAccessReports = in.readInt();
                 config.noInternetAccessExpected = in.readInt() != 0;
+                config.SIMNum = in.readInt();
                 return config;
             }
 

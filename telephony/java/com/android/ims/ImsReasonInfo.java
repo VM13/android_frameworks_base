@@ -84,6 +84,8 @@ public class ImsReasonInfo implements Parcelable {
     public static final int CODE_LOCAL_CALL_VOLTE_RETRY_REQUIRED = 147;
     // IMS call is already terminated (in TERMINATED state)
     public static final int CODE_LOCAL_CALL_TERMINATED = 148;
+    // Handover not feasible
+    public static final int CODE_LOCAL_HO_NOT_FEASIBLE = 149;
 
     /**
      * TIMEOUT (IMS -> Telephony)
@@ -98,6 +100,9 @@ public class ImsReasonInfo implements Parcelable {
     // MO : 200 OK to re-INVITE request is not received,
     // MT : No action from user after alerting the call
     public static final int CODE_TIMEOUT_NO_ANSWER_CALL_UPDATE = 203;
+
+    //Call failures for FDN
+    public static final int CODE_FDN_BLOCKED = 241;
 
     /**
      * STATUSCODE (SIP response code) (IMS -> Telephony)
@@ -150,6 +155,9 @@ public class ImsReasonInfo implements Parcelable {
     public static final int CODE_SIP_USER_REJECTED = 361;
     // Others
     public static final int CODE_SIP_GLOBAL_ERROR = 362;
+    // Emergency failure
+    public static final int CODE_EMERGENCY_TEMP_FAILURE = 363;
+    public static final int CODE_EMERGENCY_PERM_FAILURE = 364;
 
     /**
      * MEDIA (IMS -> Telephony)
@@ -225,6 +233,12 @@ public class ImsReasonInfo implements Parcelable {
      * code is received as part of the handover message.
      */
     public static final int CODE_CALL_DROP_IWLAN_TO_LTE_UNAVAILABLE = 1100;
+
+    /**
+     * MT call has ended due to a release from the network
+     * because the call was answered elsewhere
+     */
+    public static final int CODE_ANSWERED_ELSEWHERE = 1014;
 
     /**
      * Network string error messages.

@@ -77,7 +77,8 @@ public class CarrierText extends TextView {
         SimPukLocked, // SIM card is PUK locked because SIM entered wrong too many times
         SimLocked, // SIM card is currently locked
         SimPermDisabled, // SIM card is permanently disabled due to PUK unlock failure
-        SimNotReady; // SIM is not ready yet. May never be on devices w/o a SIM.
+        SimNotReady, // SIM is not ready yet. May never be on devices w/o a SIM.
+        SimIoError; //The sim card is faulty
     }
 
     public CarrierText(Context context) {
@@ -243,7 +244,7 @@ public class CarrierText extends TextView {
 
             case NetworkLocked:
                 carrierText = makeCarrierStringOnEmergencyCapable(
-                        mContext.getText(R.string.keyguard_network_locked_message), text);
+                        getContext().getText(R.string.keyguard_perso_locked_message), text);
                 break;
 
             case SimMissing:
@@ -268,6 +269,11 @@ public class CarrierText extends TextView {
             case SimPukLocked:
                 carrierText = makeCarrierStringOnEmergencyCapable(
                         getContext().getText(R.string.keyguard_sim_puk_locked_message),
+                        text);
+                break;
+            case SimIoError:
+                carrierText = makeCarrierStringOnEmergencyCapable(
+                        getContext().getText(R.string.lockscreen_sim_error_message_short),
                         text);
                 break;
         }
@@ -306,7 +312,7 @@ public class CarrierText extends TextView {
             case ABSENT:
                 return StatusMode.SimMissing;
             case NETWORK_LOCKED:
-                return StatusMode.SimMissingLocked;
+                return StatusMode.NetworkLocked;
             case NOT_READY:
                 return StatusMode.SimNotReady;
             case PIN_REQUIRED:
@@ -319,6 +325,8 @@ public class CarrierText extends TextView {
                 return StatusMode.SimPermDisabled;
             case UNKNOWN:
                 return StatusMode.SimMissing;
+            case CARD_IO_ERROR:
+                return StatusMode.SimIoError;
         }
         return StatusMode.SimMissing;
     }

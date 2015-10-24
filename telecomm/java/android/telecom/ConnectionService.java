@@ -101,6 +101,9 @@ public abstract class ConnectionService extends Service {
     private static final int MSG_ANSWER_VIDEO = 17;
     private static final int MSG_MERGE_CONFERENCE = 18;
     private static final int MSG_SWAP_CONFERENCE = 19;
+    private static final int MSG_SET_LOCAL_HOLD = 20;
+    //Proprietary values starts after this.
+    private static final int MSG_ADD_PARTICIPANT_WITH_CONFERENCE = 30;
 
     private static Connection sNullConnection;
 
@@ -199,6 +202,14 @@ public abstract class ConnectionService extends Service {
         }
 
         @Override
+        public void setLocalCallHold(String callId, boolean lchState) {
+            SomeArgs args = SomeArgs.obtain();
+            args.arg1 = callId;
+            args.argi1 = lchState ? 1 : 0;
+            mHandler.obtainMessage(MSG_SET_LOCAL_HOLD, args).sendToTarget();
+        }
+
+        @Override
         public void conference(String callId1, String callId2) {
             SomeArgs args = SomeArgs.obtain();
             args.arg1 = callId1;
@@ -209,6 +220,14 @@ public abstract class ConnectionService extends Service {
         @Override
         public void splitFromConference(String callId) {
             mHandler.obtainMessage(MSG_SPLIT_FROM_CONFERENCE, callId).sendToTarget();
+        }
+
+        @Override
+        public void addParticipantWithConference(String callId, String participant) {
+            SomeArgs args = SomeArgs.obtain();
+            args.arg1 = callId;
+            args.arg2 = participant;
+            mHandler.obtainMessage(MSG_ADD_PARTICIPANT_WITH_CONFERENCE, args).sendToTarget();
         }
 
         @Override
@@ -322,6 +341,17 @@ public abstract class ConnectionService extends Service {
                 case MSG_STOP_DTMF_TONE:
                     stopDtmfTone((String) msg.obj);
                     break;
+                case MSG_SET_LOCAL_HOLD: {
+                    SomeArgs args = (SomeArgs) msg.obj;
+                    try {
+                        String callId = (String) args.arg1;
+                        boolean lchStatus = (args.argi1 == 1);
+                        setLocalCallHold(callId, lchStatus);
+                    } finally {
+                        args.recycle();
+                    }
+                    break;
+                }
                 case MSG_CONFERENCE: {
                     SomeArgs args = (SomeArgs) msg.obj;
                     try {
@@ -336,6 +366,17 @@ public abstract class ConnectionService extends Service {
                 case MSG_SPLIT_FROM_CONFERENCE:
                     splitFromConference((String) msg.obj);
                     break;
+                case MSG_ADD_PARTICIPANT_WITH_CONFERENCE: {
+                    SomeArgs args = (SomeArgs) msg.obj;
+                    try {
+                        String callId = (String) args.arg1;
+                        String participant = (String) args.arg2;
+                        addParticipantWithConference(callId, participant);
+                    } finally {
+                        args.recycle();
+                    }
+                    break;
+                }
                 case MSG_MERGE_CONFERENCE:
                     mergeConference((String) msg.obj);
                     break;
@@ -584,6 +625,18 @@ public abstract class ConnectionService extends Service {
                 mAdapter.setExtras(id, extras);
             }
         }
+
+        @Override
+        public void onPhoneAccountChanged(Connection c, PhoneAccountHandle pHandle) {
+            String id = mIdByConnection.get(c);
+            Log.i(this, "Adapter onPhoneAccountChanged %s, %s", c, pHandle);
+            mAdapter.setPhoneAccountHandle(id, pHandle);
+        }
+
+        public void onCdmaConnectionTimeReset(Connection c) {
+            String id = mIdByConnection.get(c);
+            mAdapter.resetCdmaConnectionTime(id);
+        }
     };
 
     /** {@inheritDoc} */
@@ -639,7 +692,7 @@ public abstract class ConnectionService extends Service {
                 callId,
                 request,
                 new ParcelableConnection(
-                        request.getAccountHandle(),
+                        getAccountHandle(request, connection),
                         connection.getState(),
                         connection.getConnectionCapabilities(),
                         connection.getAddress(),
@@ -656,6 +709,21 @@ public abstract class ConnectionService extends Service {
                         connection.getDisconnectCause(),
                         createIdList(connection.getConferenceables()),
                         connection.getExtras()));
+        if (isUnknown) {
+            triggerConferenceRecalculate();
+        }
+    }
+
+    /** @hide */
+    public PhoneAccountHandle getAccountHandle(
+            final ConnectionRequest request, Connection connection) {
+        PhoneAccountHandle pHandle = connection.getPhoneAccountHandle();
+        if (pHandle != null) {
+            Log.i(this, "getAccountHandle, return account handle from local, %s", pHandle);
+            return pHandle;
+        } else {
+            return request.getAccountHandle();
+        }
     }
 
     private void abort(String callId) {
@@ -734,6 +802,11 @@ public abstract class ConnectionService extends Service {
         }
     }
 
+    private void setLocalCallHold(String callId, boolean lchStatus) {
+        Log.d(this, "setLocalCallHold %s", callId);
+        findConnectionForAction(callId, "setLocalCallHold").setLocalCallHold(lchStatus);
+    }
+
     private void conference(String callId1, String callId2) {
         Log.d(this, "conference %s, %s", callId1, callId2);
 
@@ -793,6 +866,17 @@ public abstract class ConnectionService extends Service {
         Conference conference = connection.getConference();
         if (conference != null) {
             conference.onSeparate(connection);
+        }
+    }
+
+    private void addParticipantWithConference(String callId, String participant) {
+        Log.d(this, "ConnectionService addParticipantWithConference(%s, %s)", participant, callId);
+        Conference conference = findConferenceForAction(callId, "addParticipantWithConference");
+        Connection connection = findConnectionForAction(callId, "addParticipantWithConnection");
+        if (connection != getNullConnection()) {
+            onAddParticipant(connection, participant);
+        } else if (conference != getNullConference()) {
+            conference.onAddParticipant(participant);
         }
     }
 
@@ -1016,6 +1100,16 @@ public abstract class ConnectionService extends Service {
     }
 
     /**
+     * Trigger recalculate functinality for conference calls. This is used when a Telephony
+     * Connection is part of a conference controller but is not yet added to Connection
+     * Service and hence cannot be added to the conference call.
+     *
+     * @hide
+     */
+    public void triggerConferenceRecalculate() {
+    }
+
+    /**
      * Create a {@code Connection} given an outgoing request. This is used to initiate new
      * outgoing calls.
      *
@@ -1070,6 +1164,19 @@ public abstract class ConnectionService extends Service {
      * @param connection2 A connection to merge into a conference call.
      */
     public void onConference(Connection connection1, Connection connection2) {}
+
+    /**
+     * Add participant with connection. Invoked when user has made a request to add
+     * participant with specified connection. In response, the participant should add with
+     * the connection.
+     *
+     * @param connection A connection where participant need to add.
+     * @param participant Address of participant which will be added.
+     * @return
+     *
+     * @hide
+     */
+    public void onAddParticipant(Connection connection, String participant) {}
 
     /**
      * Indicates that a remote conference has been created for existing {@link RemoteConnection}s.

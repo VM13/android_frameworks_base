@@ -230,6 +230,18 @@ final class ConnectionServiceAdapter implements DeathRecipient {
     }
 
     /**
+        * Resets the cdma connection time.
+        */
+    void resetCdmaConnectionTime(String callId) {
+        for (IConnectionServiceAdapter adapter : mAdapters) {
+            try {
+                adapter.resetCdmaConnectionTime(callId);
+            } catch (RemoteException e) {
+            }
+        }
+    }
+
+    /**
      * Indicates that the call no longer exists. Can be used with either a call or a conference
      * call.
      *
@@ -408,6 +420,16 @@ final class ConnectionServiceAdapter implements DeathRecipient {
         for (IConnectionServiceAdapter adapter : mAdapters) {
             try {
                 adapter.setExtras(callId, extras);
+            } catch (RemoteException ignored) {
+            }
+        }
+    }
+
+    void setPhoneAccountHandle(String callId, PhoneAccountHandle pHandle) {
+        Log.v(this, "setPhoneAccountHandle: %s, %s", callId, pHandle);
+        for (IConnectionServiceAdapter adapter : mAdapters) {
+            try {
+                adapter.setPhoneAccountHandle(callId, pHandle);
             } catch (RemoteException ignored) {
             }
         }

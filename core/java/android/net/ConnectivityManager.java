@@ -24,6 +24,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.net.NetworkUtils;
+import android.net.wifi.WifiDevice;
 import android.os.Binder;
 import android.os.Build.VERSION_CODES;
 import android.os.Handler;
@@ -49,6 +50,7 @@ import com.android.internal.util.Protocol;
 import java.net.InetAddress;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.HashMap;
+import java.util.List;
 
 import libcore.net.event.NetworkEventDispatcher;
 
@@ -271,6 +273,15 @@ public class ConnectivityManager {
     @SdkConstant(SdkConstantType.BROADCAST_INTENT_ACTION)
     public static final String ACTION_TETHER_STATE_CHANGED =
             "android.net.conn.TETHER_STATE_CHANGED";
+
+    /**
+     * Broadcast intent action indicating that a Station is connected
+     * or disconnected.
+     *
+     * @hide
+     */
+    public static final String TETHER_CONNECT_STATE_CHANGED =
+        "codeaurora.net.conn.TETHER_CONNECT_STATE_CHANGED";
 
     /**
      * @hide
@@ -1038,13 +1049,11 @@ public class ConnectivityManager {
             type = "enableDUN";
             result = TYPE_MOBILE_DUN;
         } else if (netCap.hasCapability(NetworkCapabilities.NET_CAPABILITY_SUPL)) {
-           type = "enableSUPL";
+            type = "enableSUPL";
             result = TYPE_MOBILE_SUPL;
-        // back out this hack for mms as they no longer need this and it's causing
-        // device slowdowns - b/23350688 (note, supl still needs this)
-        //} else if (netCap.hasCapability(NetworkCapabilities.NET_CAPABILITY_MMS)) {
-        //    type = "enableMMS";
-        //    result = TYPE_MOBILE_MMS;
+        } else if (netCap.hasCapability(NetworkCapabilities.NET_CAPABILITY_MMS)) {
+            type = "enableMMS";
+            result = TYPE_MOBILE_MMS;
         } else if (netCap.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) {
             type = "enableHIPRI";
             result = TYPE_MOBILE_HIPRI;
@@ -1655,6 +1664,20 @@ public class ConnectivityManager {
             return mService.setUsbTethering(enable);
         } catch (RemoteException e) {
             return TETHER_ERROR_SERVICE_UNAVAIL;
+        }
+    }
+
+    /**
+     * Get the list of Stations connected to Hotspot.
+     *
+     * @return a list of {@link WifiDevice} objects.
+     * {@hide}
+     */
+    public List<WifiDevice> getTetherConnectedSta() {
+        try {
+            return mService.getTetherConnectedSta();
+        } catch (RemoteException e) {
+            return null;
         }
     }
 

@@ -227,6 +227,13 @@ public abstract class Connection extends Conferenceable {
     public static final int CAPABILITY_CAN_PAUSE_VIDEO = 0x00100000;
 
     /**
+     * Add participant in an active or conference call option
+     *
+     * @hide
+     */
+    public static final int CAPABILITY_ADD_PARTICIPANT = 0x02000000;
+
+    /**
      * For a conference, indicates the conference will not have child connections.
      * <p>
      * An example of a conference with child connections is a GSM conference call, where the radio
@@ -247,9 +254,26 @@ public abstract class Connection extends Conferenceable {
      * @hide
      */
     public static final int CAPABILITY_CONFERENCE_HAS_NO_CHILDREN = 0x00200000;
+    /**
+      * Call has voice privacy capability.
+      * @hide
+      */
+    public static final int CAPABILITY_VOICE_PRIVACY = 0x00400000;
+
+    /**
+     * Local device supports voice telephony.
+     * @hide
+     */
+    public static final int CAPABILITY_SUPPORTS_DOWNGRADE_TO_VOICE_LOCAL = 0x00800000;
+
+    /**
+      * Remote device supports voice telephony.
+      * @hide
+      */
+    public static final int CAPABILITY_SUPPORTS_DOWNGRADE_TO_VOICE_REMOTE = 0x01000000;
 
     //**********************************************************************************************
-    // Next CAPABILITY value: 0x00400000
+    // Next CAPABILITY value: 0x04000000
     //**********************************************************************************************
 
     /**
@@ -274,6 +298,13 @@ public abstract class Connection extends Conferenceable {
      * {@link PhoneAccount} supports the capability {@link PhoneAccount#CAPABILITY_CALL_SUBJECT}.
      */
     public static final String EXTRA_CALL_SUBJECT = "android.telecom.extra.CALL_SUBJECT";
+
+    /**
+     * Call extras key to pack/unpack call history info.
+     * The value for this key should be an ArrayList of Strings.
+     * @hide
+     */
+    public static final String EXTRA_CALL_HISTORY_INFO = "EXTRA_CALL_HISTORY_INFO";
 
     // Flag controlling whether PII is emitted into the logs
     private static final boolean PII_DEBUG = Log.isLoggable(android.util.Log.DEBUG);
@@ -364,6 +395,12 @@ public abstract class Connection extends Conferenceable {
         if (can(capabilities, CAPABILITY_SUPPORTS_VT_REMOTE_BIDIRECTIONAL)) {
             builder.append(" CAPABILITY_SUPPORTS_VT_REMOTE_BIDIRECTIONAL");
         }
+        if (can(capabilities, CAPABILITY_SUPPORTS_DOWNGRADE_TO_VOICE_LOCAL)) {
+            builder.append(" CAPABILITY_SUPPORTS_DOWNGRADE_TO_VOICE_LOCAL");
+        }
+        if (can(capabilities, CAPABILITY_SUPPORTS_DOWNGRADE_TO_VOICE_REMOTE)) {
+            builder.append(" CAPABILITY_SUPPORTS_DOWNGRADE_TO_VOICE_REMOTE");
+        }
         if (can(capabilities, CAPABILITY_HIGH_DEF_AUDIO)) {
             builder.append(" CAPABILITY_HIGH_DEF_AUDIO");
         }
@@ -418,6 +455,8 @@ public abstract class Connection extends Conferenceable {
         public void onConferenceStarted() {}
         public void onConferenceMergeFailed(Connection c) {}
         public void onExtrasChanged(Connection c, Bundle extras) {}
+        public void onPhoneAccountChanged(Connection c, PhoneAccountHandle pHandle) {}
+        public void onCdmaConnectionTimeReset(Connection c) {}
     }
 
     /**
@@ -1080,6 +1119,7 @@ public abstract class Connection extends Conferenceable {
     private Conference mConference;
     private ConnectionService mConnectionService;
     private Bundle mExtras;
+    private PhoneAccountHandle mPhoneAccountHandle = null;
 
     /**
      * Create a new Connection.
@@ -1582,10 +1622,37 @@ public abstract class Connection extends Conferenceable {
     }
 
     /**
+       *@hide
+       * Resets the cdma connection time.
+       */
+    public final void resetCdmaConnectionTime() {
+        for (Listener l : mListeners) {
+            l.onCdmaConnectionTimeReset(this);
+        }
+    }
+
+    /**
      * Returns the connections or conferences with which this connection can be conferenced.
      */
     public final List<Conferenceable> getConferenceables() {
         return mUnmodifiableConferenceables;
+    }
+
+    /**
+     * @hide.
+     */
+    public final void setPhoneAccountHandle(PhoneAccountHandle pHandle) {
+        mPhoneAccountHandle = pHandle;
+        for (Listener l : mListeners) {
+            l.onPhoneAccountChanged(this, pHandle);
+        }
+    }
+
+    /**
+     * @hide.
+     */
+    public final PhoneAccountHandle getPhoneAccountHandle() {
+        return mPhoneAccountHandle;
     }
 
     /**
@@ -1705,6 +1772,12 @@ public abstract class Connection extends Conferenceable {
      * Notifies this Connection of a request to stop any currently playing DTMF tones.
      */
     public void onStopDtmfTone() {}
+
+    /**
+     * Notifies this to set local call hold.
+     * {@hide}
+     */
+    public void setLocalCallHold(boolean lchState) {}
 
     /**
      * Notifies this Connection of a request to disconnect.

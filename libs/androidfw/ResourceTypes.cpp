@@ -60,6 +60,7 @@ namespace android {
 #define IDMAP_CURRENT_VERSION   0x00000001
 
 #define APP_PACKAGE_ID      0x7f
+#define CMSDK_PACKAGE_ID    0x3f
 #define SYS_PACKAGE_ID      0x01
 
 static const bool kDebugStringPoolNoisy = false;
@@ -5831,7 +5832,7 @@ status_t ResTable::getEntry(
         }
 
         if (static_cast<size_t>(realEntryIndex) >= typeSpec->entryCount) {
-            ALOGW("For resource 0x%08x, entry index(%d) is beyond type entryCount(%d)",
+            ALOGV("For resource 0x%08x, entry index(%d) is beyond type entryCount(%d)",
                     Res_MAKEID(packageGroup->id - 1, typeIndex, entryIndex),
                     entryIndex, static_cast<int>(typeSpec->entryCount));
             // We should normally abort here, but some legacy apps declare
@@ -6101,7 +6102,7 @@ status_t ResTable::parsePackage(const ResTable_package* const pkg,
                 if (!typeList.isEmpty()) {
                     const Type* existingType = typeList[0];
                     if (existingType->entryCount != newEntryCount && idmapIndex < 0) {
-                        ALOGW("ResTable_typeSpec entry count inconsistent: given %d, previously %d",
+                        ALOGV("ResTable_typeSpec entry count inconsistent: given %d, previously %d",
                                 (int) newEntryCount, (int) existingType->entryCount);
                         // We should normally abort here, but some legacy apps declare
                         // resources in the 'android' package (old bug in AAPT).
@@ -6232,6 +6233,7 @@ DynamicRefTable::DynamicRefTable(uint8_t packageId)
     // Reserved package ids
     mLookupTable[APP_PACKAGE_ID] = APP_PACKAGE_ID;
     mLookupTable[SYS_PACKAGE_ID] = SYS_PACKAGE_ID;
+    mLookupTable[CMSDK_PACKAGE_ID] = CMSDK_PACKAGE_ID;
 }
 
 status_t DynamicRefTable::load(const ResTable_lib_header* const header)
@@ -6538,7 +6540,6 @@ bool ResTable::getIdmapInfo(const void* idmap, size_t sizeBytes,
     }
     return true;
 }
-
 
 #define CHAR16_TO_CSTR(c16, len) (String8(String16(c16,len)).string())
 

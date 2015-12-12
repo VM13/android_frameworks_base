@@ -88,6 +88,11 @@ public interface TelephonyProperties
      */
     static final String PROPERTY_LTE_ON_CDMA_DEVICE = "telephony.lteOnCdmaDevice";
 
+    /**
+     * {@see BaseCommands#getLteOnGsmMode()}
+     */
+    static final String PROPERTY_LTE_ON_GSM_DEVICE = "telephony.lteOnGsmDevice";
+
     static final String CURRENT_ACTIVE_PHONE = "gsm.current.phone-type";
 
     //****** SIM Card
@@ -248,4 +253,13 @@ public interface TelephonyProperties
      * if false: normal dial
      */
     static final String ADD_PARTICIPANT_KEY = "add_participant";
+
+    /**
+     * For VICE Feature
+     * If true: Dial intent is for call pull functionality
+     * if false: normal dial
+     */
+    static final String EXTRA_IS_CALL_PULL =
+            "org.codeaurora.extra.IS_CALL_PULL";
+
 }

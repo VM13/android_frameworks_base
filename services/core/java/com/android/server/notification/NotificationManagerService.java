@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2007 The Android Open Source Project
+ * Copyright (C) 2015 The CyanogenMod Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,6 +24,7 @@ import static org.xmlpull.v1.XmlPullParser.END_DOCUMENT;
 import static org.xmlpull.v1.XmlPullParser.END_TAG;
 import static org.xmlpull.v1.XmlPullParser.START_TAG;
 
+import android.annotation.Nullable;
 import android.app.ActivityManager;
 import android.app.ActivityManagerNative;
 import android.app.AppGlobals;
@@ -42,7 +44,9 @@ import android.app.usage.UsageStatsManagerInternal;
 import android.content.BroadcastReceiver;
 import android.content.ComponentName;
 import android.content.ContentResolver;
+import android.content.ContentValues;
 import android.content.Context;
+import android.database.Cursor;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.ApplicationInfo;
@@ -59,6 +63,9 @@ import android.media.AudioManager;
 import android.media.AudioManagerInternal;
 import android.media.AudioSystem;
 import android.media.IRingtonePlayer;
+import android.media.session.MediaController;
+import android.media.session.MediaSessionManager;
+import android.media.session.PlaybackState;
 import android.net.Uri;
 import android.os.Binder;
 import android.os.Build;
@@ -93,7 +100,9 @@ import android.util.ArrayMap;
 import android.util.ArraySet;
 import android.util.AtomicFile;
 import android.util.Log;
+import android.util.LruCache;
 import android.util.Slog;
+import android.util.SparseIntArray;
 import android.util.Xml;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityManager;
@@ -102,6 +111,9 @@ import android.widget.Toast;
 import com.android.internal.R;
 import com.android.internal.statusbar.NotificationVisibility;
 import com.android.internal.util.FastXmlSerializer;
+import com.android.internal.util.cm.SpamFilter;
+import com.android.internal.util.cm.SpamFilter.SpamContract.NotificationTable;
+import com.android.internal.util.cm.SpamFilter.SpamContract.PackageTable;
 import com.android.server.EventLogTags;
 import com.android.server.LocalServices;
 import com.android.server.SystemService;
@@ -141,6 +153,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Objects;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
 
 /** {@hide} */
 public class NotificationManagerService extends SystemService {
@@ -173,6 +188,8 @@ public class NotificationManagerService extends SystemService {
     static final int JUNK_SCORE = -1000;
     static final int NOTIFICATION_PRIORITY_MULTIPLIER = 10;
     static final int SCORE_DISPLAY_THRESHOLD = Notification.PRIORITY_MIN * NOTIFICATION_PRIORITY_MULTIPLIER;
+	private static final String IS_FILTERED_QUERY = NotificationTable.NORMALIZED_TEXT + "=? AND " +
+        PackageTable.PACKAGE_NAME + "=?";
 
     // Notifications with scores below this will not interrupt the user, either via LED or
     // sound or vibration
@@ -201,6 +218,9 @@ public class NotificationManagerService extends SystemService {
     /** notification_enqueue status value for an ignored notification. */
     private static final int EVENTLOG_ENQUEUE_STATUS_IGNORED = 2;
 
+    /** notification light maximum brightness value to use. */
+    private static final int LIGHT_BRIGHTNESS_MAXIMUM = 255;
+
     private IActivityManager mAm;
     AudioManager mAudioManager;
     AudioManagerInternal mAudioManagerInternal;
@@ -220,9 +240,34 @@ public class NotificationManagerService extends SystemService {
     private int mDefaultNotificationLedOff;
     private long[] mDefaultVibrationPattern;
 
+    private boolean mAdjustableNotificationLedBrightness;
+    private int mNotificationLedBrightnessLevel = LIGHT_BRIGHTNESS_MAXIMUM;
+
+    private boolean mMultipleNotificationLeds;
+    private boolean mMultipleLedsEnabledSetting = false;
+
+    private boolean mScreenOnEnabled = false;
+    private boolean mScreenOnDefault = false;
+
     private long[] mFallbackVibrationPattern;
     private boolean mUseAttentionLight;
     boolean mSystemReady;
+
+    private final SparseIntArray mSpamCache;
+    private ExecutorService mSpamExecutor = Executors.newSingleThreadExecutor();
+
+    private static final Uri FILTER_MSG_URI = new Uri.Builder()
+            .scheme(ContentResolver.SCHEME_CONTENT)
+            .authority(SpamFilter.AUTHORITY)
+            .appendPath("messages")
+            .build();
+
+    private static final Uri UPDATE_MSG_URI = new Uri.Builder()
+            .scheme(ContentResolver.SCHEME_CONTENT)
+            .authority(SpamFilter.AUTHORITY)
+            .appendPath(SpamFilter.MESSAGE_PATH)
+            .appendEncodedPath("inc_count")
+            .build();
 
     private boolean mDisableNotificationEffects;
     private int mCallState;
@@ -283,6 +328,8 @@ public class NotificationManagerService extends SystemService {
     private NotificationListeners mListeners;
     private ConditionProviders mConditionProviders;
     private NotificationUsageStats mUsageStats;
+    private boolean mDisableDuckingWhileMedia;
+    private boolean mActiveMedia;
 
     private static final int MY_UID = Process.myUid();
     private static final int MY_PID = Process.myPid();
@@ -626,9 +673,16 @@ public class NotificationManagerService extends SystemService {
 
                 // lights
                 // clear only if lockscreen is not active
-                if (mKeyguardManager != null && !mKeyguardManager.isKeyguardLocked()) {
-                    mLights.clear();
-                    updateLightsLocked();
+                // and LED is not forced on by Settings app
+                if (mLights.size() > 0) {
+                    final String owner = mLights.get(mLights.size() - 1);
+                    NotificationRecord ledNotification = mNotificationsByKey.get(owner);
+                    if (mKeyguardManager != null && !mKeyguardManager.isKeyguardLocked()) {
+                        if (!isLedNotificationForcedOn(ledNotification)) {
+                            mLights.clear();
+                        }
+                        updateLightsLocked();
+                    }
                 }
             }
         }
@@ -791,12 +845,16 @@ public class NotificationManagerService extends SystemService {
                 }
             } else if (action.equals(Intent.ACTION_USER_PRESENT)) {
                 // turn off LED when user passes through lock screen
-                mNotificationLight.turnOff();
-                mStatusBar.notificationLightOff();
+                // if lights with screen on is disabled.
+                if (!mScreenOnEnabled) {
+                    mNotificationLight.turnOff();
+                    mStatusBar.notificationLightOff();
+                }
             } else if (action.equals(Intent.ACTION_USER_SWITCHED)) {
                 final int user = intent.getIntExtra(Intent.EXTRA_USER_HANDLE, UserHandle.USER_NULL);
                 // reload per-user settings
                 mSettingsObserver.update(null);
+                mSpamFilterObserver.update(null);
                 mUserProfiles.updateCache(context);
                 // Refresh managed services
                 mConditionProviders.onUserSwitched(user);
@@ -811,13 +869,105 @@ public class NotificationManagerService extends SystemService {
         }
     };
 
-    private final class LEDSettingsObserver extends ContentObserver {
+    class SpamFilterObserver extends ContentObserver {
+
+        private Future mTask;
+
+        public SpamFilterObserver(Handler handler) {
+            super(handler);
+        }
+
+        private void addToCache(Cursor c) {
+            int notifId = c.getInt(c.getColumnIndex(
+                    NotificationTable.ID));
+            String pkgName = c.getString(c.getColumnIndex(
+                    PackageTable.PACKAGE_NAME));
+            String normalizedText = c.getString(c.getColumnIndex(
+                    NotificationTable.NORMALIZED_TEXT));
+            int hash = getSpamCacheHash(normalizedText, pkgName);
+            synchronized (mSpamCache) {
+                mSpamCache.put(hash, notifId);
+            }
+        }
+
+        private Runnable mFetchAllFilters = new Runnable() {
+            @Override
+            public void run() {
+                Cursor c = getContext().getContentResolver().query(FILTER_MSG_URI,
+                        null, null, null, null);
+                if (c != null) {
+                    synchronized (mSpamCache) {
+                        mSpamCache.clear();
+                        while (c.moveToNext()) {
+                            addToCache(c);
+                            if (Thread.interrupted()) {
+                                break;
+                            }
+                            c.close();
+                        }
+                    }
+                }
+            }
+        };
+
+        @Override
+        public void onChange(boolean selfChange, Uri uri) {
+            update(uri);
+        }
+
+        void update(final Uri uri) {
+            if (mTask != null && !mTask.isDone()) {
+                mTask.cancel(true);
+            }
+            if (uri == null) {
+                mTask = mSpamExecutor.submit(mFetchAllFilters);
+            } else {
+                Runnable r = new Runnable() {
+                    @Override
+                    public void run() {
+                        String id = uri.getLastPathSegment();
+                        Cursor c = getContext().getContentResolver().query(
+                                uri, null, null, null, null);
+
+                        if (c != null) {
+                            int index;
+                            synchronized (mSpamCache) {
+                                index = mSpamCache.indexOfValue(Integer.parseInt(id));
+                            }
+                            if (!c.moveToFirst()) {
+                                synchronized (mSpamCache) {
+                                    // Filter was deleted
+                                    if (index >= 0) {
+                                        mSpamCache.removeAt(index);
+                                    }
+                                }
+                            } else if (index < 0) {
+                                // Filter was added/updated
+                                addToCache(c);
+                            }
+                            c.close();
+                        }
+                    }
+                };
+                mTask = mSpamExecutor.submit(r);
+            }
+        }
+
+        public void observe() {
+            ContentResolver resolver = getContext().getContentResolver();
+            resolver.registerContentObserver(SpamFilter.NOTIFICATION_URI,
+                    true, this, UserHandle.USER_ALL);
+            update(null);
+        }
+    }
+
+    class SettingsObserver extends ContentObserver {
         private final Uri NOTIFICATION_LIGHT_PULSE_URI
                 = Settings.System.getUriFor(Settings.System.NOTIFICATION_LIGHT_PULSE);
         private final Uri ENABLED_NOTIFICATION_LISTENERS_URI
                 = Settings.Secure.getUriFor(Settings.Secure.ENABLED_NOTIFICATION_LISTENERS);
 
-        LEDSettingsObserver(Handler handler) {
+        SettingsObserver(Handler handler) {
             super(handler);
         }
 
@@ -842,6 +992,22 @@ public class NotificationManagerService extends SystemService {
             resolver.registerContentObserver(Settings.System.getUriFor(
                     Settings.System.NOTIFICATION_LIGHT_PULSE_CUSTOM_VALUES),
                     false, this, UserHandle.USER_ALL);
+            resolver.registerContentObserver(Settings.System.getUriFor(
+                    Settings.System.NOTIFICATION_LIGHT_SCREEN_ON),
+                    false, this, UserHandle.USER_ALL);
+            resolver.registerContentObserver(Settings.Global.getUriFor(
+                    Settings.Global.ZEN_DISABLE_DUCKING_DURING_MEDIA_PLAYBACK), false,
+                    this, UserHandle.USER_ALL);
+            if (mAdjustableNotificationLedBrightness) {
+                resolver.registerContentObserver(Settings.System.getUriFor(
+                        Settings.System.NOTIFICATION_LIGHT_BRIGHTNESS_LEVEL),
+                        false, this, UserHandle.USER_ALL);
+            }
+            if (mMultipleNotificationLeds) {
+                resolver.registerContentObserver(Settings.System.getUriFor(
+                        Settings.System.NOTIFICATION_LIGHT_MULTIPLE_LEDS_ENABLE),
+                        false, this, UserHandle.USER_ALL);
+            }
             update(null);
         }
 
@@ -881,11 +1047,47 @@ public class NotificationManagerService extends SystemService {
                         UserHandle.USER_CURRENT));
             }
 
+            // Notification LED brightness
+            if (mAdjustableNotificationLedBrightness) {
+                mNotificationLedBrightnessLevel = Settings.System.getIntForUser(resolver,
+                        Settings.System.NOTIFICATION_LIGHT_BRIGHTNESS_LEVEL,
+                        LIGHT_BRIGHTNESS_MAXIMUM, UserHandle.USER_CURRENT);
+            }
+
+            // Multiple LEDs enabled
+            if (mMultipleNotificationLeds) {
+                mMultipleLedsEnabledSetting = (Settings.System.getIntForUser(resolver,
+                        Settings.System.NOTIFICATION_LIGHT_MULTIPLE_LEDS_ENABLE,
+                        mMultipleNotificationLeds ? 1 : 0, UserHandle.USER_CURRENT) != 0);
+            }
+
+            // Notification lights with screen on
+            mScreenOnEnabled = (Settings.System.getIntForUser(resolver,
+                    Settings.System.NOTIFICATION_LIGHT_SCREEN_ON,
+                    mScreenOnDefault ? 1 : 0, UserHandle.USER_CURRENT) != 0);
+
             updateNotificationPulse();
+
+            mDisableDuckingWhileMedia = Settings.Global.getInt(resolver,
+                    Settings.Global.ZEN_DISABLE_DUCKING_DURING_MEDIA_PLAYBACK, 0) == 1;
+            updateDisableDucking();
         }
     }
 
-    private LEDSettingsObserver mSettingsObserver;
+    private void updateDisableDucking() {
+        if (!mSystemReady) {
+            return;
+        }
+        final MediaSessionManager mediaSessionManager = (MediaSessionManager) getContext()
+                .getSystemService(Context.MEDIA_SESSION_SERVICE);
+        mediaSessionManager.removeOnActiveSessionsChangedListener(mSessionListener);
+        if (mDisableDuckingWhileMedia) {
+            mediaSessionManager.addOnActiveSessionsChangedListener(mSessionListener, null);
+        }
+    }
+
+    private SettingsObserver mSettingsObserver;
+    private SpamFilterObserver mSpamFilterObserver;
     private ZenModeHelper mZenModeHelper;
 
     private final Runnable mBuzzBeepBlinked = new Runnable() {
@@ -910,6 +1112,7 @@ public class NotificationManagerService extends SystemService {
 
     public NotificationManagerService(Context context) {
         super(context);
+        mSpamCache = new SparseIntArray();
     }
 
     @Override
@@ -997,6 +1200,11 @@ public class NotificationManagerService extends SystemService {
                 VIBRATE_PATTERN_MAXLEN,
                 DEFAULT_VIBRATE_PATTERN);
 
+        mAdjustableNotificationLedBrightness = resources.getBoolean(
+                com.android.internal.R.bool.config_adjustableNotificationLedBrightness);
+        mMultipleNotificationLeds = resources.getBoolean(
+                com.android.internal.R.bool.config_multipleNotificationLeds);
+
         mUseAttentionLight = resources.getBoolean(R.bool.config_useAttentionLight);
 
         // Don't start allowing notifications until the setup wizard has run once.
@@ -1039,8 +1247,11 @@ public class NotificationManagerService extends SystemService {
         getContext().registerReceiverAsUser(mPackageIntentReceiver, UserHandle.ALL, sdFilter, null,
                 null);
 
-        mSettingsObserver = new LEDSettingsObserver(mHandler);
+        mSettingsObserver = new SettingsObserver(mHandler);
         mSettingsObserver.observe();
+
+        mSpamFilterObserver = new SpamFilterObserver(mHandler);
+        mSpamFilterObserver.observe();
 
         mArchive = new Archive(resources.getInteger(
                 R.integer.config_notificationServiceArchiveSize));
@@ -1083,10 +1294,13 @@ public class NotificationManagerService extends SystemService {
             mAudioManager = (AudioManager) getContext().getSystemService(Context.AUDIO_SERVICE);
             mAudioManagerInternal = getLocalService(AudioManagerInternal.class);
             mZenModeHelper.onSystemReady();
+
+            updateDisableDucking();
         } else if (phase == SystemService.PHASE_THIRD_PARTY_APPS_CAN_START) {
             // This observer will force an update when observe is called, causing us to
             // bind to listener services.
             mSettingsObserver.observe();
+            mSpamFilterObserver.observe();
             mListeners.onBootPhaseAppsCanStart();
             mConditionProviders.onBootPhaseAppsCanStart();
         }
@@ -2239,6 +2453,11 @@ public class NotificationManagerService extends SystemService {
                         return;
                     }
 
+                    if (isNotificationSpam(notification, pkg)) {
+                        mArchive.record(r.sbn);
+                        return;
+                    }
+
                     int index = indexOfNotificationLocked(n.getKey());
                     if (index < 0) {
                         mNotificationList.add(r);
@@ -2382,6 +2601,21 @@ public class NotificationManagerService extends SystemService {
         return false;
     }
 
+    private MediaSessionManager.OnActiveSessionsChangedListener mSessionListener =
+            new MediaSessionManager.OnActiveSessionsChangedListener() {
+        @Override
+        public void onActiveSessionsChanged(@Nullable List<MediaController> controllers) {
+            for (MediaController activeSession : controllers) {
+                PlaybackState playbackState = activeSession.getPlaybackState();
+                if (playbackState != null && playbackState.getState() == PlaybackState.STATE_PLAYING) {
+                    mActiveMedia = true;
+                    return;
+                }
+            }
+            mActiveMedia = false;
+        }
+    };
+
     private void buzzBeepBlinkLocked(NotificationRecord record) {
         boolean buzz = false;
         boolean beep = false;
@@ -2451,7 +2685,7 @@ public class NotificationManagerService extends SystemService {
                 hasValidSound = (soundUri != null);
             }
 
-            if (hasValidSound) {
+            if (hasValidSound && (!mDisableDuckingWhileMedia || !mActiveMedia)) {
                 boolean looping =
                         (notification.flags & Notification.FLAG_INSISTENT) != 0;
                 AudioAttributes audioAttributes = audioAttributesForNotification(notification);
@@ -2816,6 +3050,33 @@ public class NotificationManagerService extends SystemService {
         return (x < low) ? low : ((x > high) ? high : x);
     }
 
+    private int getSpamCacheHash(CharSequence message, String packageName) {
+        return (message + packageName).hashCode();
+    }
+
+    private boolean isNotificationSpam(Notification notification, String basePkg) {
+        CharSequence normalizedContent = SpamFilter
+                .getNormalizedNotificationContent(notification);
+        int notificationHash = getSpamCacheHash(normalizedContent, basePkg);
+        int notificationId;
+        synchronized (mSpamCache) {
+            notificationId = mSpamCache.get(notificationHash, -1);
+        }
+        if (notificationId != -1) {
+            final String notifIdString = String.valueOf(notificationId);
+            mSpamExecutor.submit(new Runnable() {
+                @Override
+                public void run() {
+                    Uri updateUri = Uri.withAppendedPath(UPDATE_MSG_URI,
+                            notifIdString);
+                    getContext().getContentResolver().update(updateUri,
+                            new ContentValues(), null, null);
+                }
+            });
+        }
+        return notificationId != -1;
+    }
+
     void sendAccessibilityEvent(Notification notification, CharSequence packageName) {
         AccessibilityManager manager = AccessibilityManager.getInstance(getContext());
         if (!manager.isEnabled()) {
@@ -3146,7 +3407,7 @@ public class NotificationManagerService extends SystemService {
             enableLed = false;
         } else if (isLedNotificationForcedOn(ledNotification)) {
             enableLed = true;
-        } else if (mInCall || mScreenOn) {
+        } else if (!mScreenOnEnabled && (mInCall || mScreenOn)) {
             enableLed = false;
         } else {
             enableLed = true;
@@ -3175,6 +3436,10 @@ public class NotificationManagerService extends SystemService {
                 ledOnMS = ledno.ledOnMS;
                 ledOffMS = ledno.ledOffMS;
             }
+
+            // update the LEDs modes variables
+            mNotificationLight.setModes(mNotificationLedBrightnessLevel,
+                    mMultipleLedsEnabledSetting);
 
             if (mNotificationPulseEnabled) {
                 // pulse repeatedly

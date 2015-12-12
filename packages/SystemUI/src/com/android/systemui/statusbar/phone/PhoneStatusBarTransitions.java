@@ -32,11 +32,14 @@ public final class PhoneStatusBarTransitions extends BarTransitions {
     private final PhoneStatusBarView mView;
     private final float mIconAlphaWhenOpaque;
 
-    private View mLeftSide, mStatusIcons, mSignalCluster, mBattery, mClock;
+    private View mLeftSide, mStatusIcons, mSignalCluster, mBattery, mClock, mMinitBattery;
     private Animator mCurrentAnimation;
 
     public PhoneStatusBarTransitions(PhoneStatusBarView view) {
-        super(view, R.drawable.status_background);
+        super(view, R.drawable.status_background, R.color.status_bar_background_opaque,
+                R.color.status_bar_background_semi_transparent,
+                R.color.status_bar_background_transparent,
+                com.android.internal.R.color.battery_saver_mode_color);
         mView = view;
         final Resources res = mView.getContext().getResources();
         mIconAlphaWhenOpaque = res.getFraction(R.dimen.status_bar_icon_drawing_alpha, 1, 1);
@@ -48,6 +51,7 @@ public final class PhoneStatusBarTransitions extends BarTransitions {
         mSignalCluster = mView.findViewById(R.id.signal_cluster);
         mBattery = mView.findViewById(R.id.battery);
         mClock = mView.findViewById(R.id.clock);
+        mMinitBattery = mView.findViewById(R.id.minitBattery);        
         applyModeBackground(-1, getMode(), false /*animate*/);
         applyMode(getMode(), false /*animate*/);
     }
@@ -92,7 +96,8 @@ public final class PhoneStatusBarTransitions extends BarTransitions {
                     animateTransitionTo(mStatusIcons, newAlpha),
                     animateTransitionTo(mSignalCluster, newAlpha),
                     animateTransitionTo(mBattery, newAlphaBC),
-                    animateTransitionTo(mClock, newAlphaBC)
+                    animateTransitionTo(mClock, newAlphaBC),
+                    animateTransitionTo(mMinitBattery, newAlphaBC)     
                     );
             if (isLightsOut(mode)) {
                 anims.setDuration(LIGHTS_OUT_DURATION);
@@ -105,6 +110,7 @@ public final class PhoneStatusBarTransitions extends BarTransitions {
             mSignalCluster.setAlpha(newAlpha);
             mBattery.setAlpha(newAlphaBC);
             mClock.setAlpha(newAlphaBC);
+            mMinitBattery.setAlpha(newAlphaBC);
         }
     }
 }

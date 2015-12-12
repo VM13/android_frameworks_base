@@ -200,6 +200,18 @@ public class QsTuner extends Fragment implements Callback {
         else if (spec.equals("location")) return R.string.quick_settings_location_label;
         else if (spec.equals("cast")) return R.string.quick_settings_cast_title;
         else if (spec.equals("hotspot")) return R.string.quick_settings_hotspot_label;
+        else if (spec.equals("brightness")) return R.string.quick_settings_brightness_label;
+        else if (spec.equals("screenOff")) return R.string.quick_settings_screen_off_label;
+        else if (spec.equals("screenshot")) return R.string.quick_settings_screenshot_label;
+        else if (spec.equals("volume")) return R.string.quick_settings_volume_panel_label;
+        else if (spec.equals("expanded_desktop")) return R.string.quick_settings_expanded_desktop_label;
+        else if (spec.equals("screen_timeout")) return R.string.quick_settings_screen_timeout_label;
+        else if (spec.equals("profiles")) return R.string.quick_settings_profiles_detail_label;
+        else if (spec.equals("nfc")) return R.string.quick_settings_nfc_label;
+        else if (spec.equals("sync")) return R.string.quick_settings_sync_label;
+        else if (spec.equals("reboot")) return R.string.quick_settings_reboot_label;
+        else if (spec.equals("music")) return R.string.quick_settings_music_label;
+        else if (spec.equals("battery_saver")) return R.string.quick_settings_battery_saver; 
         return 0;
     }
 
@@ -265,7 +277,7 @@ public class QsTuner extends Fragment implements Callback {
                 }
             }
             String[] defaults =
-                getContext().getString(R.string.quick_settings_tiles_default).split(",");
+                getContext().getString(R.string.quick_settings_tiles_available).split(",");
             final String[] available = new String[defaults.length + 1
                                                   - (tiles.size() - numBroadcast)];
             final String[] availableTiles = new String[available.length];
@@ -391,11 +403,6 @@ public class QsTuner extends Fragment implements Callback {
         }
 
         @Override
-        public boolean supportsDualTargets() {
-            return "wifi".equals(mSpec) || "bt".equals(mSpec);
-        }
-
-        @Override
         public void setListening(boolean listening) {
         }
 
@@ -443,6 +450,18 @@ public class QsTuner extends Fragment implements Callback {
             else if (mSpec.equals("location")) return R.drawable.ic_signal_location_enable;
             else if (mSpec.equals("cast")) return R.drawable.ic_qs_cast_on;
             else if (mSpec.equals("hotspot")) return R.drawable.ic_hotspot_enable;
+            else if (mSpec.equals("brightness")) return R.drawable.ic_qs_brightness_auto_off_alpha;
+            else if (mSpec.equals("screenOff")) return R.drawable.ic_qs_power;
+            else if (mSpec.equals("screenshot")) return R.drawable.ic_qs_screenshot;
+            else if (mSpec.equals("volume")) return R.drawable.ic_qs_volume_panel;
+            else if (mSpec.equals("expanded_desktop")) return R.drawable.ic_qs_expanded_desktop_off;
+            else if (mSpec.equals("screen_timeout")) return R.drawable.ic_qs_screen_timeout_vector;
+            else if (mSpec.equals("profiles")) return R.drawable.ic_qs_system_profiles; 
+            else if (mSpec.equals("nfc")) return R.drawable.ic_qs_nfc_on;
+            else if (mSpec.equals("sync")) return R.drawable.ic_qs_sync_on;
+            else if (mSpec.equals("reboot")) return R.drawable.ic_qs_reboot;
+            else if (mSpec.equals("music")) return R.drawable.ic_qs_media_play;
+            else if (mSpec.equals("battery_saver")) return R.drawable.ic_qs_battery_saver_on;
             return R.drawable.android;
         }
 

@@ -18,7 +18,10 @@ package android.os;
 
 import android.annotation.SdkConstant;
 import android.annotation.SystemApi;
+import android.content.ComponentName;
 import android.content.Context;
+import android.content.Intent;
+import android.text.TextUtils;
 import android.util.Log;
 
 /**
@@ -387,7 +390,7 @@ public final class PowerManager {
      * @hide
      */
     public static final String REBOOT_RECOVERY = "recovery";
-    
+
     final Context mContext;
     final IPowerManager mService;
     final Handler mHandler;
@@ -674,6 +677,19 @@ public final class PowerManager {
     }
 
     /**
+     * Forces the device to wake up from sleep only if
+     * nothing is blocking the proximity sensor
+     * @see #wakeUp
+     * @hide
+     */
+    public void wakeUpWithProximityCheck(long time, String reason) {
+        try {
+            mService.wakeUpWithProximityCheck(time, reason, mContext.getOpPackageName());
+        } catch (RemoteException e) {
+        }
+    }
+
+    /**
      * Forces the device to start napping.
      * <p>
      * If the device is currently awake, starts dreaming, otherwise does nothing.
@@ -881,6 +897,17 @@ public final class PowerManager {
         } catch (RemoteException e) {
             return false;
         }
+    }
+
+    public String getSeenWakeLocks()
+    {
+	try {
+	    if (mService != null) {
+		return mService.getSeenWakeLocks();
+	    }
+	} catch (RemoteException e) {
+	}
+	return null;
     }
 
     /**
@@ -1281,5 +1308,22 @@ public final class PowerManager {
     public int getDefaultKeyboardBrightness() {
         return mContext.getResources().getInteger(
                 com.android.internal.R.integer.config_keyboardBrightnessSettingDefault);
+    }
+
+    /**
+     * Boost the CPU. Boosts the cpu for the given duration in microseconds.
+     *
+     * @param duration in microseconds to boost the CPU
+     *
+     * @hide
+     */
+    public void cpuBoost(int duration)
+    {
+        try {
+            if (mService != null) {
+                mService.cpuBoost(duration);
+            }
+        } catch (RemoteException e) {
+        }
     }
 }

@@ -16,6 +16,7 @@
 
 package android.telephony;
 
+import android.util.SparseArray;
 import com.android.i18n.phonenumbers.NumberParseException;
 import com.android.i18n.phonenumbers.PhoneNumberUtil;
 import com.android.i18n.phonenumbers.PhoneNumberUtil.PhoneNumberFormat;
@@ -139,6 +140,55 @@ public class PhoneNumberUtils
     /** Returns true if ch is not dialable or alpha char */
     private static boolean isSeparator(char ch) {
         return !isDialable(ch) && !(('a' <= ch && ch <= 'z') || ('A' <= ch && ch <= 'Z'));
+    }
+
+    /**
+     * On some CDMA networks +COUNTRYCODE must be rewritten to 0 when making a local
+     * call from within the user's home network.  We maintain a white list of
+     * (country code prefix) -> (rewrite rule) to perform this substitution.
+     *
+     * Since country codes are variable length it is easiest to compile a regex
+     */
+    private static SparseArray<RewriteRule> sCdmaLocalRewriteWhitelist;
+    private static Pattern sCdmaLocalRewritePattern;
+    static {
+        sCdmaLocalRewriteWhitelist = new SparseArray<RewriteRule>();
+        addRewriteRule(62, "ID", "0"); // indonesia
+        addRewriteRule(380, "UA", "0"); // ukraine
+
+        StringBuffer regex = new StringBuffer();
+        regex.append("[+](");
+        for (int i=0; i < sCdmaLocalRewriteWhitelist.size(); ++i) {
+            int countryCode = sCdmaLocalRewriteWhitelist.keyAt(i);
+            if (i > 0) {
+                regex.append("|");
+            }
+            regex.append(countryCode);
+        }
+        regex.append(")");
+        sCdmaLocalRewritePattern = Pattern.compile(regex.toString());
+    }
+
+    private static class RewriteRule {
+        public int countryCodePrefix;
+        public String isoCountryCode;
+        public String replacement;
+
+        public RewriteRule(int countryCodePrefix, String isoCountryCode, String replacement) {
+            this.countryCodePrefix = countryCodePrefix;
+            this.isoCountryCode = isoCountryCode;
+            this.replacement = replacement;
+        }
+
+        public String apply(String dialStr) {
+            return dialStr.replaceFirst("[+]" + countryCodePrefix, replacement);
+        }
+    }
+
+    private static void addRewriteRule(int countryCodePrefix,
+                                       String isoCountryCode, String replacement) {
+        sCdmaLocalRewriteWhitelist.put(countryCodePrefix,
+                new RewriteRule(countryCodePrefix, isoCountryCode, replacement));
     }
 
     /** Extracts the phone number from an Intent.
@@ -1138,6 +1188,8 @@ public class PhoneNumberUtils
         "VI", // U.S. Virgin Islands
     };
 
+    private static final String KOREA_ISO_COUNTRY_CODE = "KR";
+
     /**
      * Breaks the given number down and formats it according to the rules
      * for the country the number is from.
@@ -1458,7 +1510,19 @@ public class PhoneNumberUtils
         String result = null;
         try {
             PhoneNumber pn = util.parseAndKeepRawInput(phoneNumber, defaultCountryIso);
-            result = util.formatInOriginalFormat(pn, defaultCountryIso);
+            /**
+             * Need to reformat any local Korean phone numbers (when the user is in Korea) with
+             * country code to corresponding national format which would replace the leading
+             * +82 with 0.
+             */
+            if (KOREA_ISO_COUNTRY_CODE.equals(defaultCountryIso) &&
+                    (pn.getCountryCode() == util.getCountryCodeForRegion(KOREA_ISO_COUNTRY_CODE)) &&
+                    (pn.getCountryCodeSource() ==
+                            PhoneNumber.CountryCodeSource.FROM_NUMBER_WITH_PLUS_SIGN)) {
+                result = util.format(pn, PhoneNumberUtil.PhoneNumberFormat.NATIONAL);
+            } else {
+                result = util.formatInOriginalFormat(pn, defaultCountryIso);
+            }
         } catch (NumberParseException e) {
         }
         return result;
@@ -2568,6 +2632,29 @@ public class PhoneNumberUtils
     }
 
     /**
+     * Returns a rewrite rule for the country code prefix if the dial string matches the
+     * whitelist and the user is in their home network
+     *
+     * @param dialStr number being dialed
+     * @param currIso ISO code of currently attached network
+     * @param defaultIso ISO code of user's sim
+     * @return RewriteRule or null if conditions fail
+     */
+    private static RewriteRule getCdmaLocalRewriteRule(String dialStr,
+                                                       String currIso, String defaultIso) {
+        Matcher m = sCdmaLocalRewritePattern.matcher(dialStr);
+        if (m.find()) {
+            String dialPrefix = m.group(1);
+            RewriteRule rule = sCdmaLocalRewriteWhitelist.get(Integer.valueOf(dialPrefix));
+            if (currIso.equalsIgnoreCase(defaultIso) &&
+                    currIso.equalsIgnoreCase(rule.isoCountryCode)) {
+                return rule;
+            }
+        }
+        return null;
+    }
+
+    /**
      * Determines if the specified number is actually a URI
      * (i.e. a SIP address) rather than a regular PSTN phone number,
      * based on whether or not the number contains an "@" character.
@@ -2630,8 +2717,16 @@ public class PhoneNumberUtils
                 // Remove the leading plus sign
                 retStr = newStr;
             } else {
-                // Replaces the plus sign with the default IDP
-                retStr = networkDialStr.replaceFirst("[+]", getCurrentIdp(useNanp));
+                RewriteRule rewriteRule =
+                        getCdmaLocalRewriteRule(networkDialStr,
+                                TelephonyManager.getDefault().getNetworkCountryIso(),
+                                TelephonyManager.getDefault().getSimCountryIso());
+                if (rewriteRule != null) {
+                    retStr = rewriteRule.apply(networkDialStr);
+                } else {
+                    // Replaces the plus sign with the default IDP
+                    retStr = networkDialStr.replaceFirst("[+]", getCurrentIdp(useNanp));
+                }
             }
         }
         if (DBG) log("processPlusCode, retStr=" + retStr);

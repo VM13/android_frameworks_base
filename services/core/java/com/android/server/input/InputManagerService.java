@@ -17,6 +17,7 @@
 package com.android.server.input;
 
 import android.view.Display;
+import com.android.internal.os.SomeArgs;
 import com.android.internal.R;
 import com.android.internal.util.XmlUtils;
 import com.android.server.DisplayThread;
@@ -52,6 +53,7 @@ import android.hardware.input.IInputManager;
 import android.hardware.input.InputDeviceIdentifier;
 import android.hardware.input.InputManager;
 import android.hardware.input.InputManagerInternal;
+import android.hardware.input.ITabletModeChangedListener;
 import android.hardware.input.KeyboardLayout;
 import android.hardware.input.TouchCalibration;
 import android.os.Binder;
@@ -93,6 +95,7 @@ import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 
 import libcore.io.Streams;
 import libcore.util.Objects;
@@ -112,6 +115,7 @@ public class InputManagerService extends IInputManager.Stub
     private static final int MSG_RELOAD_KEYBOARD_LAYOUTS = 3;
     private static final int MSG_UPDATE_KEYBOARD_LAYOUTS = 4;
     private static final int MSG_RELOAD_DEVICE_ALIASES = 5;
+    private static final int MSG_DELIVER_TABLET_MODE_CHANGED = 6;
 
     // Pointer to native input manager service object.
     private final long mPtr;
@@ -123,6 +127,13 @@ public class InputManagerService extends IInputManager.Stub
     private WiredAccessoryCallbacks mWiredAccessoryCallbacks;
     private boolean mSystemReady;
     private NotificationManager mNotificationManager;
+
+    private final Object mTabletModeLock = new Object();
+    // List of currently registered tablet mode changed listeners by process id
+    private final SparseArray<TabletModeChangedListenerRecord> mTabletModeChangedListeners =
+            new SparseArray<>(); // guarded by mTabletModeLock
+    private final List<TabletModeChangedListenerRecord> mTempTabletModeChangedListenersToNotify =
+            new ArrayList<>();
 
     // Persistent data store.  Must be locked each time during use.
     private final PersistentDataStore mDataStore = new PersistentDataStore();
@@ -150,7 +161,6 @@ public class InputManagerService extends IInputManager.Stub
 
     // State for the currently installed input filter.
     final Object mInputFilterLock = new Object();
-    IInputFilter mInputFilter; // guarded by mInputFilterLock
     ChainedInputFilterHost mInputFilterHost; // guarded by mInputFilterLock
     ArrayList<ChainedInputFilterHost> mInputFilterChain =
             new ArrayList<ChainedInputFilterHost>(); // guarded by mInputFilterLock
@@ -188,6 +198,8 @@ public class InputManagerService extends IInputManager.Stub
             InputChannel fromChannel, InputChannel toChannel);
     private static native void nativeSetPointerSpeed(long ptr, int speed);
     private static native void nativeSetShowTouches(long ptr, boolean enabled);
+    private static native void nativeSetStylusIconEnabled(long ptr, boolean enabled);
+    private static native void nativeSetVolumeKeysRotation(long ptr, int mode);
     private static native void nativeSetInteractive(long ptr, boolean interactive);
     private static native void nativeReloadCalibration(long ptr);
     private static native void nativeVibrate(long ptr, int deviceId, long[] pattern,
@@ -229,6 +241,11 @@ public class InputManagerService extends IInputManager.Stub
     /** Switch code: Lid switch.  When set, lid is shut. */
     public static final int SW_LID = 0x00;
 
+    /** Switch code: Tablet mode switch.
+     * When set, the device is in tablet mode (i.e. no keyboard is connected).
+     */
+    public static final int SW_TABLET_MODE = 0x01;
+
     /** Switch code: Keypad slide.  When set, keyboard is exposed. */
     public static final int SW_KEYPAD_SLIDE = 0x0a;
 
@@ -248,6 +265,7 @@ public class InputManagerService extends IInputManager.Stub
     public static final int SW_CAMERA_LENS_COVER = 0x09;
 
     public static final int SW_LID_BIT = 1 << SW_LID;
+    public static final int SW_TABLET_MODE_BIT = 1 << SW_TABLET_MODE;
     public static final int SW_KEYPAD_SLIDE_BIT = 1 << SW_KEYPAD_SLIDE;
     public static final int SW_HEADPHONE_INSERT_BIT = 1 << SW_HEADPHONE_INSERT;
     public static final int SW_MICROPHONE_INSERT_BIT = 1 << SW_MICROPHONE_INSERT;
@@ -290,17 +308,22 @@ public class InputManagerService extends IInputManager.Stub
 
         registerPointerSpeedSettingObserver();
         registerShowTouchesSettingObserver();
+        registerStylusIconEnabledSettingObserver();
+        registerVolumeKeysRotationSettingObserver();
 
         mContext.registerReceiver(new BroadcastReceiver() {
             @Override
             public void onReceive(Context context, Intent intent) {
                 updatePointerSpeedFromSettings();
                 updateShowTouchesFromSettings();
+                updateVolumeKeysRotationFromSettings();
             }
         }, new IntentFilter(Intent.ACTION_USER_SWITCHED), null, mHandler);
 
         updatePointerSpeedFromSettings();
         updateShowTouchesFromSettings();
+        updateStylusIconEnabledFromSettings();
+        updateVolumeKeysRotationFromSettings();
     }
 
     // TODO(BT) Pass in paramter for bluetooth system
@@ -497,20 +520,10 @@ public class InputManagerService extends IInputManager.Stub
      */
     public void setInputFilter(IInputFilter filter) {
         synchronized (mInputFilterLock) {
-            final IInputFilter oldFilter = mInputFilter;
-            if (oldFilter == filter) {
-                return; // nothing to do
-            }
-
-            if (oldFilter != null) {
+            if (mInputFilterHost != null) {
                 mInputFilterHost.disconnectLocked();
                 mInputFilterChain.remove(mInputFilterHost);
                 mInputFilterHost = null;
-                try {
-                    oldFilter.uninstall();
-                } catch (RemoteException re) {
-                    /* ignore */
-                }
             }
 
             if (filter != null) {
@@ -820,6 +833,57 @@ public class InputManagerService extends IInputManager.Stub
             } finally {
                 mDataStore.saveIfNeeded();
             }
+        }
+    }
+
+    @Override // Binder call
+    public void registerTabletModeChangedListener(ITabletModeChangedListener listener) {
+        if (!checkCallingPermission(android.Manifest.permission.TABLET_MODE_LISTENER,
+                "registerTabletModeChangedListener()")) {
+            throw new SecurityException("Requires TABLET_MODE_LISTENER permission");
+        }
+        if (listener == null) {
+            throw new IllegalArgumentException("listener must not be null");
+        }
+
+        synchronized (mTabletModeLock) {
+            final int callingPid = Binder.getCallingPid();
+            if (mTabletModeChangedListeners.get(callingPid) != null) {
+                throw new IllegalStateException("The calling process has already registered "
+                        + "a TabletModeChangedListener.");
+            }
+            TabletModeChangedListenerRecord record =
+                    new TabletModeChangedListenerRecord(callingPid, listener);
+            try {
+                IBinder binder = listener.asBinder();
+                binder.linkToDeath(record, 0);
+            } catch (RemoteException ex) {
+                throw new RuntimeException(ex);
+            }
+            mTabletModeChangedListeners.put(callingPid, record);
+        }
+    }
+
+    private void onTabletModeChangedListenerDied(int pid) {
+        synchronized (mTabletModeLock) {
+            mTabletModeChangedListeners.remove(pid);
+        }
+    }
+
+    // Must be called on handler
+    private void deliverTabletModeChanged(long whenNanos, boolean inTabletMode) {
+        mTempTabletModeChangedListenersToNotify.clear();
+        final int numListeners;
+        synchronized (mTabletModeLock) {
+            numListeners = mTabletModeChangedListeners.size();
+            for (int i = 0; i < numListeners; i++) {
+                mTempTabletModeChangedListenersToNotify.add(
+                        mTabletModeChangedListeners.valueAt(i));
+            }
+        }
+        for (int i = 0; i < numListeners; i++) {
+            mTempTabletModeChangedListenersToNotify.get(i).notifyTabletModeChanged(
+                    whenNanos, inTabletMode);
         }
     }
 
@@ -1329,6 +1393,58 @@ public class InputManagerService extends IInputManager.Stub
         return result;
     }
 
+    public void updateStylusIconEnabledFromSettings() {
+        int enabled = getStylusIconEnabled(0);
+        nativeSetStylusIconEnabled(mPtr, enabled != 0);
+    }
+
+    public void registerStylusIconEnabledSettingObserver() {
+        mContext.getContentResolver().registerContentObserver(
+                Settings.System.getUriFor(Settings.System.STYLUS_ICON_ENABLED), false,
+                new ContentObserver(mHandler) {
+                    @Override
+                    public void onChange(boolean selfChange) {
+                        updateStylusIconEnabledFromSettings();
+                    }
+                });
+    }
+
+    private int getStylusIconEnabled(int defaultValue) {
+        int result = defaultValue;
+        try {
+            result = Settings.System.getInt(mContext.getContentResolver(),
+                Settings.System.STYLUS_ICON_ENABLED);
+        } catch (SettingNotFoundException snfe) {
+        }
+        return result;
+    }
+
+    public void updateVolumeKeysRotationFromSettings() {
+        int mode = getVolumeKeysRotationSetting(0);
+        nativeSetVolumeKeysRotation(mPtr, mode);
+    }
+
+    public void registerVolumeKeysRotationSettingObserver() {
+        mContext.getContentResolver().registerContentObserver(
+                Settings.System.getUriFor(Settings.System.SWAP_VOLUME_KEYS_ON_ROTATION), false,
+                new ContentObserver(mHandler) {
+                    @Override
+                    public void onChange(boolean selfChange) {
+                        updateVolumeKeysRotationFromSettings();
+                    }
+                });
+    }
+
+    private int getVolumeKeysRotationSetting(int defaultValue) {
+        int result = defaultValue;
+        try {
+            result = Settings.System.getIntForUser(mContext.getContentResolver(),
+                    Settings.System.SWAP_VOLUME_KEYS_ON_ROTATION, UserHandle.USER_CURRENT);
+        } catch (SettingNotFoundException snfe) {
+        }
+        return result;
+    }
+
     // Binder call
     @Override
     public void vibrate(int deviceId, long[] pattern, int repeat, IBinder token) {
@@ -1467,6 +1583,15 @@ public class InputManagerService extends IInputManager.Stub
         if (mUseDevInputEventForAudioJack && (switchMask & SW_JACK_BITS) != 0) {
             mWiredAccessoryCallbacks.notifyWiredAccessoryChanged(whenNanos, switchValues,
                     switchMask);
+        }
+
+        if ((switchMask & SW_TABLET_MODE) != 0) {
+            SomeArgs args = SomeArgs.obtain();
+            args.argi1 = (int) (whenNanos & 0xFFFFFFFF);
+            args.argi2 = (int) (whenNanos >> 32);
+            args.arg1 = Boolean.valueOf((switchValues & SW_TABLET_MODE_BIT) != 0);
+            mHandler.obtainMessage(MSG_DELIVER_TABLET_MODE_CHANGED,
+                    args).sendToTarget();
         }
     }
 
@@ -1720,6 +1845,12 @@ public class InputManagerService extends IInputManager.Stub
                 case MSG_RELOAD_DEVICE_ALIASES:
                     reloadDeviceAliases();
                     break;
+                case MSG_DELIVER_TABLET_MODE_CHANGED:
+                    SomeArgs args = (SomeArgs) msg.obj;
+                    long whenNanos = (args.argi1 & 0xFFFFFFFFl) | ((long) args.argi2 << 32);
+                    boolean inTabletMode = (boolean) args.arg1;
+                    deliverTabletModeChanged(whenNanos, inTabletMode);
+                    break;
             }
         }
     }
@@ -1866,6 +1997,34 @@ public class InputManagerService extends IInputManager.Stub
             } catch (RemoteException ex) {
                 Slog.w(TAG, "Failed to notify process "
                         + mPid + " that input devices changed, assuming it died.", ex);
+                binderDied();
+            }
+        }
+    }
+
+    private final class TabletModeChangedListenerRecord implements DeathRecipient {
+        private final int mPid;
+        private final ITabletModeChangedListener mListener;
+
+        public TabletModeChangedListenerRecord(int pid, ITabletModeChangedListener listener) {
+            mPid = pid;
+            mListener = listener;
+        }
+
+        @Override
+        public void binderDied() {
+            if (DEBUG) {
+                Slog.d(TAG, "Tablet mode changed listener for pid " + mPid + " died.");
+            }
+            onTabletModeChangedListenerDied(mPid);
+        }
+
+        public void notifyTabletModeChanged(long whenNanos, boolean inTabletMode) {
+            try {
+                mListener.onTabletModeChanged(whenNanos, inTabletMode);
+            } catch (RemoteException ex) {
+                Slog.w(TAG, "Failed to notify process " + mPid +
+                        " that tablet mode changed, assuming it died.", ex);
                 binderDied();
             }
         }

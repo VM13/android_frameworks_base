@@ -48,6 +48,8 @@
     <uses-permission android:name="android.permission.SET_PREFERRED_APPLICATIONS" />
     <uses-permission android:name="android.permission.WRITE_SETTINGS" />
     <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
+    <uses-permission android:name="cyanogenmod.permission.WRITE_SETTINGS" />
+    <uses-permission android:name="cyanogenmod.permission.WRITE_SECURE_SETTINGS" />
     <uses-permission android:name="android.permission.BROADCAST_STICKY" />
     <!-- Development tool permissions granted to the shell. -->
     <uses-permission android:name="android.permission.SET_DEBUG_APP" />
@@ -107,6 +109,7 @@
     <uses-permission android:name="android.permission.REGISTER_CONNECTION_MANAGER" />
     <uses-permission android:name="android.permission.REGISTER_SIM_SUBSCRIPTION" />
     <uses-permission android:name="android.permission.GET_APP_OPS_STATS" />
+    <uses-permission android:name="android.permission.ACCESS_THEME_MANAGER" />
 
     <application android:label="@string/app_label">
         <provider
@@ -133,7 +136,7 @@
 
         <activity
             android:name=".BugreportWarningActivity"
-            android:theme="@*android:style/Theme.DeviceDefault.Light.Dialog.Alert"
+            android:theme="@*android:style/Theme.Material.DayNight.Dialog.Alert"
             android:finishOnCloseSystemDialogs="true"
             android:excludeFromRecents="true"
             android:exported="false" />
@@ -142,6 +145,7 @@
             android:name=".BugreportReceiver"
             android:permission="android.permission.DUMP">
             <intent-filter>
+                <action android:name="android.intent.action.BUGREPORT_STARTED" />
                 <action android:name="android.intent.action.BUGREPORT_FINISHED" />
             </intent-filter>
         </receiver>

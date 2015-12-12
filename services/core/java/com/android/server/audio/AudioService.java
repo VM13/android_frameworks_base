@@ -59,6 +59,7 @@ import android.media.AudioFormat;
 import android.media.AudioManager;
 import android.media.AudioManagerInternal;
 import android.media.AudioPort;
+import android.media.AudioRecord;
 import android.media.AudioRoutesInfo;
 import android.media.IAudioFocusDispatcher;
 import android.media.IAudioRoutesObserver;
@@ -281,16 +282,16 @@ public class AudioService extends IAudioService.Stub {
 
    /** Maximum volume index values for audio streams */
     private static int[] MAX_STREAM_VOLUME = new int[] {
-        5,  // STREAM_VOICE_CALL
-        7,  // STREAM_SYSTEM
-        7,  // STREAM_RING
-        15, // STREAM_MUSIC
+        15,  // STREAM_VOICE_CALL
+        15,  // STREAM_SYSTEM
+        15,  // STREAM_RING
+        30, // STREAM_MUSIC
         7,  // STREAM_ALARM
-        7,  // STREAM_NOTIFICATION
-        15, // STREAM_BLUETOOTH_SCO
+        30,  // STREAM_NOTIFICATION
+        30, // STREAM_BLUETOOTH_SCO
         7,  // STREAM_SYSTEM_ENFORCED
-        15, // STREAM_DTMF
-        15  // STREAM_TTS
+        30, // STREAM_DTMF
+        30  // STREAM_TTS
     };
 
     /** Minimum volume index values for audio streams */
@@ -372,6 +373,7 @@ public class AudioService extends IAudioService.Stub {
     };
 
     private final boolean mUseFixedVolume;
+    private boolean mLinkNotificationWithVolume;
 
     private final AudioSystem.ErrorCallback mAudioSystemCallback = new AudioSystem.ErrorCallback() {
         public void onError(int error) {
@@ -404,6 +406,15 @@ public class AudioService extends IAudioService.Stub {
     /** Streams that can be muted. Do not resolve to aliases when checking.
      * @see System#MUTE_STREAMS_AFFECTED */
     private int mMuteAffectedStreams;
+
+    /** @see #handleHotwordInput **/
+    private Object mHotwordInputLock = new Object();
+
+    /** The package name of the application that is
+     * currently using the HOTWORD input.
+     */
+    // protected by mHotwordInputLock
+    private String mHotwordAudioInputPackage;
 
     /**
      * NOTE: setVibrateSetting(), getVibrateSetting(), shouldVibrate() are deprecated.
@@ -455,7 +466,8 @@ public class AudioService extends IAudioService.Stub {
 
     // List of binder death handlers for setMode() client processes.
     // The last process to have called setMode() is at the top of the list.
-    private final ArrayList <SetModeDeathHandler> mSetModeDeathHandlers = new ArrayList <SetModeDeathHandler>();
+    private final ArrayList <SetModeDeathHandler> mSetModeDeathHandlers =
+                    new ArrayList <SetModeDeathHandler>();
 
     // List of clients having issued a SCO start request
     private final ArrayList <ScoClient> mScoClients = new ArrayList <ScoClient>();
@@ -528,7 +540,6 @@ public class AudioService extends IAudioService.Stub {
     private volatile IRingtonePlayer mRingtonePlayer;
 
     private int mDeviceOrientation = Configuration.ORIENTATION_UNDEFINED;
-    private int mDeviceRotation = Surface.ROTATION_0;
 
     // Request to override default use of A2DP for media.
     private boolean mBluetoothA2dpEnabled;
@@ -542,7 +553,6 @@ public class AudioService extends IAudioService.Stub {
     // Devices for which the volume is fixed and VolumePanel slider should be disabled
     int mFixedVolumeDevices = AudioSystem.DEVICE_OUT_HDMI |
             AudioSystem.DEVICE_OUT_DGTL_DOCK_HEADSET |
-            AudioSystem.DEVICE_OUT_ANLG_DOCK_HEADSET |
             AudioSystem.DEVICE_OUT_HDMI_ARC |
             AudioSystem.DEVICE_OUT_SPDIF |
             AudioSystem.DEVICE_OUT_AUX_LINE;
@@ -553,6 +563,9 @@ public class AudioService extends IAudioService.Stub {
     private final boolean mMonitorRotation;
 
     private boolean mDockAudioMediaEnabled = true;
+
+    private boolean mForceAnalogDeskDock;
+    private boolean mForceAnalogCarDock;
 
     private int mDockState = Intent.EXTRA_DOCK_STATE_UNDOCKED;
 
@@ -571,8 +584,6 @@ public class AudioService extends IAudioService.Stub {
     private final Object mA2dpAvrcpLock = new Object();
     // If absolute volume is supported in AVRCP device
     private boolean mAvrcpAbsVolSupported = false;
-
-    private AudioOrientationEventListener mOrientationListener;
 
     private static Long mLastDeviceConnectMsgTime = new Long(0);
 
@@ -593,6 +604,16 @@ public class AudioService extends IAudioService.Stub {
     public static String makeAlsaAddressString(int card, int device) {
         return "card=" + card + ";device=" + device + ";";
     }
+
+    // only these packages are allowed to override Pulse visualizer lock
+    private static final String[] VISUALIZER_WHITELIST = new String[] {
+            "android",
+            "com.android.systemui",
+            "com.android.keyguard",
+            "com.google.android.googlequicksearchbox"
+    };
+
+    private boolean mVisualizerLocked;
 
     ///////////////////////////////////////////////////////////////////////////
     // Construction
@@ -657,6 +678,14 @@ public class AudioService extends IAudioService.Stub {
         mUseFixedVolume = mContext.getResources().getBoolean(
                 com.android.internal.R.bool.config_useFixedVolume);
 
+        mForceAnalogDeskDock = mContext.getResources().getBoolean(
+                com.android.internal.R.bool.config_forceAnalogDeskDock);
+        mForceAnalogCarDock = mContext.getResources().getBoolean(
+                com.android.internal.R.bool.config_forceAnalogCarDock);
+
+        mLinkNotificationWithVolume = Settings.System.getIntForUser(mContentResolver,
+                Settings.System.VOLUME_LINK_NOTIFICATION, 1, UserHandle.USER_CURRENT) == 1;
+
         // must be called before readPersistedSettings() which needs a valid mStreamVolumeAlias[]
         // array initialized by updateStreamVolumeAlias()
         updateStreamVolumeAlias(false /*updateVolumes*/, TAG);
@@ -696,15 +725,7 @@ public class AudioService extends IAudioService.Stub {
         }
         mMonitorRotation = SystemProperties.getBoolean("ro.audio.monitorRotation", false);
         if (mMonitorRotation) {
-            mDeviceRotation = ((WindowManager) mContext.getSystemService(Context.WINDOW_SERVICE))
-                    .getDefaultDisplay().getRotation();
-            Log.v(TAG, "monitoring device rotation, initial=" + mDeviceRotation);
-
-            mOrientationListener = new AudioOrientationEventListener(mContext);
-            mOrientationListener.enable();
-
-            // initialize rotation in AudioSystem
-            setRotationForAudioSystem();
+            RotationHelper.init(mContext, mAudioHandler);
         }
 
         context.registerReceiverAsUser(mReceiver, UserHandle.ALL, intentFilter, null, null);
@@ -834,7 +855,7 @@ public class AudioService extends IAudioService.Stub {
             setOrientationForAudioSystem();
         }
         if (mMonitorRotation) {
-            setRotationForAudioSystem();
+            RotationHelper.updateOrientation();
         }
 
         synchronized (mBluetoothA2dpEnabledLock) {
@@ -1074,6 +1095,11 @@ public class AudioService extends IAudioService.Stub {
         }
 
         mStreamVolumeAlias[AudioSystem.STREAM_DTMF] = dtmfStreamAlias;
+        if (mLinkNotificationWithVolume) {
+            mStreamVolumeAlias[AudioSystem.STREAM_NOTIFICATION] = AudioSystem.STREAM_RING;
+        } else {
+            mStreamVolumeAlias[AudioSystem.STREAM_NOTIFICATION] = AudioSystem.STREAM_NOTIFICATION;
+        }
         if (updateVolumes) {
             mStreamStates[AudioSystem.STREAM_DTMF].setAllIndexes(mStreamStates[dtmfStreamAlias],
                     caller);
@@ -1178,26 +1204,8 @@ public class AudioService extends IAudioService.Stub {
     }
 
     private int rescaleIndex(int index, int srcStream, int dstStream) {
-        return (index * mStreamStates[dstStream].getMaxIndex() + mStreamStates[srcStream].getMaxIndex() / 2) / mStreamStates[srcStream].getMaxIndex();
-    }
-
-    private class AudioOrientationEventListener
-            extends OrientationEventListener {
-        public AudioOrientationEventListener(Context context) {
-            super(context);
-        }
-
-        @Override
-        public void onOrientationChanged(int orientation) {
-            //Even though we're responding to phone orientation events,
-            //use display rotation so audio stays in sync with video/dialogs
-            int newRotation = ((WindowManager) mContext.getSystemService(
-                    Context.WINDOW_SERVICE)).getDefaultDisplay().getRotation();
-            if (newRotation != mDeviceRotation) {
-                mDeviceRotation = newRotation;
-                setRotationForAudioSystem();
-            }
-        }
+        return (index * mStreamStates[dstStream].getMaxIndex()
+            + mStreamStates[srcStream].getMaxIndex() / 2) / mStreamStates[srcStream].getMaxIndex();
     }
 
     ///////////////////////////////////////////////////////////////////////////
@@ -1601,6 +1609,46 @@ public class AudioService extends IAudioService.Stub {
         sendVolumeUpdate(streamType, oldIndex, index, flags);
     }
 
+    /**
+     * Retrieve the package name of the application that currently controls
+     * the {@link android.media.MediaRecorder.AudioSource#HOTWORD} input.
+     * @return The package name of the application that controls the input
+     * or null if no package currently controls it.
+     */
+    public String getCurrentHotwordInputPackageName() {
+        return mHotwordAudioInputPackage;
+    }
+
+    /**
+     * Handle the change of state of the HOTWORD input.
+     *
+     * When the {@link android.media.MediaRecorder.AudioSource#HOTWORD} input is
+     * in use, send a broadcast to alert the new state and store the name of the current
+     * package that controls the input in mHotwordAudioInputPackage.
+     * @param listening Whether the input is being listened to.
+     */
+    public void handleHotwordInput(boolean listening) {
+        synchronized (mHotwordInputLock) {
+            Intent broadcastIntent = new Intent(Intent.ACTION_HOTWORD_INPUT_CHANGED);
+            String[] packages = mContext.getPackageManager().getPackagesForUid(
+                    Binder.getCallingUid());
+            if (packages.length > 0) {
+                if (listening) {
+                    mHotwordAudioInputPackage = packages[0];
+                }
+                broadcastIntent.putExtra(Intent.EXTRA_CURRENT_PACKAGE_NAME, packages[0]);
+            }
+            broadcastIntent.putExtra(Intent.EXTRA_HOTWORD_INPUT_STATE,
+                                     listening ? AudioRecord.RECORDSTATE_RECORDING :
+                                     AudioRecord.RECORDSTATE_STOPPED);
+            // Set the currently listening package to null if listening has stopped.
+            if (!listening) {
+                mHotwordAudioInputPackage = null;
+            }
+            sendBroadcastToAll(broadcastIntent, Manifest.permission.CAPTURE_AUDIO_HOTWORD);
+        }
+    }
+
     /** @see AudioManager#forceVolumeControlStream(int) */
     public void forceVolumeControlStream(int streamType, IBinder cb) {
         synchronized(mForceControlStreamLock) {
@@ -1653,11 +1701,15 @@ public class AudioService extends IAudioService.Stub {
     }
 
     private void sendBroadcastToAll(Intent intent) {
+        sendBroadcastToAll(intent, null);
+    }
+
+    private void sendBroadcastToAll(Intent intent, String receiverPermission) {
         intent.addFlags(Intent.FLAG_RECEIVER_REGISTERED_ONLY_BEFORE_BOOT);
         intent.addFlags(Intent.FLAG_RECEIVER_FOREGROUND);
         final long ident = Binder.clearCallingIdentity();
         try {
-            mContext.sendBroadcastAsUser(intent, UserHandle.ALL);
+            mContext.sendBroadcastAsUser(intent, UserHandle.ALL, receiverPermission);
         } finally {
             Binder.restoreCallingIdentity(ident);
         }
@@ -2647,11 +2699,14 @@ public class AudioService extends IAudioService.Stub {
     }
 
     /** @see AudioManager#setBluetoothScoOn(boolean) */
-    public void setBluetoothScoOn(boolean on){
+    public void setBluetoothScoOn(boolean on) {
         if (!checkAudioSettingsPermission("setBluetoothScoOn()")) {
             return;
         }
+        setBluetoothScoOnInt(on);
+    }
 
+    public void setBluetoothScoOnInt(boolean on) {
         if (on) {
             mForcedUseForComm = AudioSystem.FORCE_BT_SCO;
         } else if (mForcedUseForComm == AudioSystem.FORCE_BT_SCO) {
@@ -3012,6 +3067,8 @@ public class AudioService extends IAudioService.Stub {
             mScoAudioState = SCO_STATE_INACTIVE;
             broadcastScoConnectionState(AudioManager.SCO_AUDIO_STATE_DISCONNECTED);
         }
+        AudioSystem.setParameters("A2dpSuspended=false");
+        setBluetoothScoOnInt(false);
     }
 
     private void broadcastScoConnectionState(int state) {
@@ -3479,6 +3536,25 @@ public class AudioService extends IAudioService.Stub {
     @Override
     public boolean isStreamAffectedByMute(int streamType) {
         return (mMuteAffectedStreams & (1 << streamType)) != 0;
+    }
+
+    /** @hide */
+    public boolean isVisualizerLocked(String callingPackage) {
+        boolean isSystem = false;
+        for (int i = 0; i < VISUALIZER_WHITELIST.length; i++) {
+            if (TextUtils.equals(callingPackage, VISUALIZER_WHITELIST[i])) {
+                isSystem = true;
+                break;
+            }
+        }
+        return !isSystem && mVisualizerLocked;
+    }
+
+    /** @hide */
+    public void setVisualizerLocked(boolean doLock) {
+        if (mVisualizerLocked != doLock) {
+            mVisualizerLocked = doLock;
+        }
     }
 
     private void ensureValidDirection(int direction) {
@@ -4665,6 +4741,8 @@ public class AudioService extends IAudioService.Stub {
                 Settings.System.MODE_RINGER_STREAMS_AFFECTED), false, this);
             mContentResolver.registerContentObserver(Settings.Global.getUriFor(
                 Settings.Global.DOCK_AUDIO_MEDIA_ENABLED), false, this);
+            mContentResolver.registerContentObserver(Settings.System.getUriFor(
+                Settings.System.VOLUME_LINK_NOTIFICATION), false, this);
         }
 
         @Override
@@ -4684,7 +4762,16 @@ public class AudioService extends IAudioService.Stub {
                 }
                 readDockAudioSettings(mContentResolver);
             }
-        }
+
+                mLinkNotificationWithVolume = Settings.System.getIntForUser(mContentResolver,
+                        Settings.System.VOLUME_LINK_NOTIFICATION, 1, UserHandle.USER_CURRENT) == 1;
+                if (mLinkNotificationWithVolume) {
+                    mStreamVolumeAlias[AudioSystem.STREAM_NOTIFICATION] = AudioSystem.STREAM_RING;
+                } else {
+                    mStreamVolumeAlias[AudioSystem.STREAM_NOTIFICATION] =
+                        AudioSystem.STREAM_NOTIFICATION;
+                }
+          }
     }
 
     // must be called synchronized on mConnectedDevices
@@ -5158,10 +5245,12 @@ public class AudioService extends IAudioService.Stub {
                 int config;
                 switch (dockState) {
                     case Intent.EXTRA_DOCK_STATE_DESK:
-                        config = AudioSystem.FORCE_BT_DESK_DOCK;
+                        config = mForceAnalogDeskDock ? AudioSystem.FORCE_ANALOG_DOCK :
+                                                        AudioSystem.FORCE_BT_DESK_DOCK;
                         break;
                     case Intent.EXTRA_DOCK_STATE_CAR:
-                        config = AudioSystem.FORCE_BT_CAR_DOCK;
+                        config = mForceAnalogCarDock ? AudioSystem.FORCE_ANALOG_DOCK :
+                                                       AudioSystem.FORCE_BT_CAR_DOCK;
                         break;
                     case Intent.EXTRA_DOCK_STATE_LE_DESK:
                         config = AudioSystem.FORCE_ANALOG_DOCK;
@@ -5235,14 +5324,13 @@ public class AudioService extends IAudioService.Stub {
                 }
             } else if (action.equals(Intent.ACTION_SCREEN_ON)) {
                 if (mMonitorRotation) {
-                    mOrientationListener.onOrientationChanged(0); //argument is ignored anyway
-                    mOrientationListener.enable();
+                    RotationHelper.enable();
                 }
                 AudioSystem.setParameters("screen_state=on");
             } else if (action.equals(Intent.ACTION_SCREEN_OFF)) {
                 if (mMonitorRotation) {
                     //reduce wakeups (save current) by only listening when display is on
-                    mOrientationListener.disable();
+                    RotationHelper.disable();
                 }
                 AudioSystem.setParameters("screen_state=off");
             } else if (action.equals(Intent.ACTION_CONFIGURATION_CHANGED)) {
@@ -5499,6 +5587,7 @@ public class AudioService extends IAudioService.Stub {
         }
     }
 
+    //TODO move to an external "orientation helper" class
     private void setOrientationForAudioSystem() {
         switch (mDeviceOrientation) {
             case Configuration.ORIENTATION_LANDSCAPE:
@@ -5521,26 +5610,6 @@ public class AudioService extends IAudioService.Stub {
                 Log.e(TAG, "Unknown orientation");
         }
     }
-
-    private void setRotationForAudioSystem() {
-        switch (mDeviceRotation) {
-            case Surface.ROTATION_0:
-                AudioSystem.setParameters("rotation=0");
-                break;
-            case Surface.ROTATION_90:
-                AudioSystem.setParameters("rotation=90");
-                break;
-            case Surface.ROTATION_180:
-                AudioSystem.setParameters("rotation=180");
-                break;
-            case Surface.ROTATION_270:
-                AudioSystem.setParameters("rotation=270");
-                break;
-            default:
-                Log.e(TAG, "Unknown device rotation");
-        }
-    }
-
 
     // Handles request to override default use of A2DP for media.
     // Must be called synchronized on mConnectedDevices
@@ -6389,3 +6458,4 @@ public class AudioService extends IAudioService.Stub {
         }
     }
 }
+

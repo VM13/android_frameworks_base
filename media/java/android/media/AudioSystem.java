@@ -695,16 +695,16 @@ public class AudioSystem
     }
 
     public static int[] DEFAULT_STREAM_VOLUME = new int[] {
-        4,  // STREAM_VOICE_CALL
+        15,  // STREAM_VOICE_CALL
         7,  // STREAM_SYSTEM
-        5,  // STREAM_RING
-        11, // STREAM_MUSIC
+        15,  // STREAM_RING
+        30, // STREAM_MUSIC
         6,  // STREAM_ALARM
-        5,  // STREAM_NOTIFICATION
-        7,  // STREAM_BLUETOOTH_SCO
+        15,  // STREAM_NOTIFICATION
+        30,  // STREAM_BLUETOOTH_SCO
         7,  // STREAM_SYSTEM_ENFORCED
-        11, // STREAM_DTMF
-        11  // STREAM_TTS
+        30, // STREAM_DTMF
+        30  // STREAM_TTS
     };
 
     public static String streamToString(int stream) {

@@ -90,6 +90,7 @@ LOCAL_SRC_FILES += \
 	core/java/android/app/IWallpaperManager.aidl \
 	core/java/android/app/IWallpaperManagerCallback.aidl \
 	core/java/android/app/admin/IDevicePolicyManager.aidl \
+	core/java/android/app/trust/IStrongAuthTracker.aidl \
 	core/java/android/app/trust/ITrustManager.aidl \
 	core/java/android/app/trust/ITrustListener.aidl \
 	core/java/android/app/backup/IBackupManager.aidl \
@@ -146,6 +147,9 @@ LOCAL_SRC_FILES += \
 	core/java/android/content/pm/IPackageMoveObserver.aidl \
 	core/java/android/content/pm/IPackageStatsObserver.aidl \
 	core/java/android/content/pm/IOnPermissionsChangeListener.aidl \
+    core/java/android/content/res/IThemeChangeListener.aidl \
+	core/java/android/content/res/IThemeProcessingListener.aidl \
+	core/java/android/content/res/IThemeService.aidl \
 	core/java/android/database/IContentObserver.aidl \
 	core/java/android/hardware/ICameraService.aidl \
 	core/java/android/hardware/ICameraServiceListener.aidl \
@@ -162,6 +166,7 @@ LOCAL_SRC_FILES += \
 	core/java/android/hardware/fingerprint/IFingerprintDaemon.aidl \
 	core/java/android/hardware/fingerprint/IFingerprintDaemonCallback.aidl \
 	core/java/android/hardware/fingerprint/IFingerprintService.aidl \
+	core/java/android/hardware/fingerprint/IFingerprintServiceLockoutResetCallback.aidl \
 	core/java/android/hardware/fingerprint/IFingerprintServiceReceiver.aidl \
 	core/java/android/hardware/hdmi/IHdmiControlCallback.aidl \
 	core/java/android/hardware/hdmi/IHdmiControlService.aidl \
@@ -174,7 +179,9 @@ LOCAL_SRC_FILES += \
 	core/java/android/hardware/hdmi/IHdmiVendorCommandListener.aidl \
 	core/java/android/hardware/input/IInputManager.aidl \
 	core/java/android/hardware/input/IInputDevicesChangedListener.aidl \
+	core/java/android/hardware/input/ITabletModeChangedListener.aidl \
 	core/java/android/hardware/location/IActivityRecognitionHardware.aidl \
+	core/java/android/hardware/location/IActivityRecognitionHardwareClient.aidl \
 	core/java/android/hardware/location/IActivityRecognitionHardwareSink.aidl \
 	core/java/android/hardware/location/IActivityRecognitionHardwareWatcher.aidl \
 	core/java/android/hardware/location/IFusedLocationHardware.aidl \
@@ -246,6 +253,9 @@ LOCAL_SRC_FILES += \
 	core/java/android/service/voice/IVoiceInteractionService.aidl \
 	core/java/android/service/voice/IVoiceInteractionSession.aidl \
 	core/java/android/service/voice/IVoiceInteractionSessionService.aidl \
+	core/java/android/service/gesture/IEdgeGestureService.aidl \
+	core/java/android/service/gesture/IEdgeGestureActivationListener.aidl \
+	core/java/android/service/gesture/IEdgeGestureHostCallback.aidl \
 	core/java/android/service/gesture/IGestureService.aidl \
 	core/java/android/service/wallpaper/IWallpaperConnection.aidl \
 	core/java/android/service/wallpaper/IWallpaperEngine.aidl \
@@ -350,6 +360,7 @@ LOCAL_SRC_FILES += \
 	media/java/android/media/IRingtonePlayer.aidl \
 	media/java/android/media/IVolumeController.aidl \
 	media/java/android/media/audiopolicy/IAudioPolicyCallback.aidl \
+	media/java/android/media/midi/IBluetoothMidiService.aidl \
 	media/java/android/media/midi/IMidiDeviceListener.aidl \
 	media/java/android/media/midi/IMidiDeviceOpenCallback.aidl \
 	media/java/android/media/midi/IMidiDeviceServer.aidl \
@@ -1036,7 +1047,7 @@ LOCAL_STATIC_JAVA_LIBRARIES:=$(framework_docs_LOCAL_STATIC_JAVA_LIBRARIES)
 LOCAL_JAVA_LIBRARIES:=$(framework_docs_LOCAL_JAVA_LIBRARIES)
 LOCAL_MODULE_CLASS:=$(framework_docs_LOCAL_MODULE_CLASS)
 LOCAL_DROIDDOC_SOURCE_PATH:=$(framework_docs_LOCAL_DROIDDOC_SOURCE_PATH)
-LOCAL_DROIDDOC_HTML_DIR:=docs/html-ndk
+LOCAL_DROIDDOC_HTML_DIR:=$(framework_docs_LOCAL_DROIDDOC_HTML_DIR)
 LOCAL_ADDITIONAL_JAVA_DIR:=$(framework_docs_LOCAL_ADDITIONAL_JAVA_DIR)
 LOCAL_ADDITIONAL_DEPENDENCIES:=$(framework_docs_LOCAL_ADDITIONAL_DEPENDENCIES)
 # specify a second html input dir and an output path relative to OUT_DIR)

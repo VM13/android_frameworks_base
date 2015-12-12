@@ -21,6 +21,7 @@ package com.android.internal.logging;
  * @hide
  */
 public interface MetricsConstants {
+    public static final int DONT_TRACK_ME_BRO = -Integer.MAX_VALUE + 1;
     // These constants must match those in the analytic pipeline, do not edit.
     // Add temporary values to the top of MetricsLogger instead.
     public static final int VIEW_UNKNOWN = 0;
@@ -262,6 +263,16 @@ public interface MetricsConstants {
     public static final int TUNER_DEMO_MODE_ON = 236;
     public static final int TUNER_BATTERY_PERCENTAGE = 237;
     public static final int FUELGAUGE_INACTIVE_APPS = 238;
+    public static final int QS_EXPANDED_DESKTOP = 239;
+    public static final int QS_BRIGHTNESS = 240;
+    public static final int QS_SCREEN_OFF = 241;
+    public static final int QS_SCREENSHOT = 242;
+    public static final int QS_VOLUME = 243; 
+    public static final int QS_SCREEN_TIMEOUT = 244;
+    public static final int QS_PROFILES = 245; 
+
+    // Lock screen weather settings
+    public static final int LOCKSCREEN_WEATHER_SETTINGS = 248;
 
     // These constants must match those in the analytic pipeline, do not edit.
     // Add temporary values to the top of MetricsLogger instead.

@@ -2596,10 +2596,10 @@
       has violated its self-enforced StrictMode policy.</string>
 
     <!-- [CHAR LIMIT=40] Title of dialog that is shown when performing a system upgrade. -->
-    <string name="android_upgrading_title">VM 13 is upgrading\u2026</string>
+    <string name="android_upgrading_title">VM13 is upgrading\u2026</string>
 
     <!-- [CHAR LIMIT=40] Title of dialog that is shown when system is starting. -->
-    <string name="android_start_title"> VM 13 is starting\u2026</string>
+    <string name="android_start_title">VM13 is starting\u2026</string>
 
     <!-- [CHAR LIMIT=NONE] Message shown in upgrading dialog when doing an fstrim. -->
     <string name="android_upgrading_fstrim">Optimizing storage.</string>
@@ -2616,7 +2616,7 @@
     <string name="android_upgrading_starting_apps">Starting apps.</string>
 
     <!-- [CHAR LIMIT=NONE] Message to show in upgrading dialog when the bulk of the upgrade work is done. -->
-    <string name="android_upgrading_complete">Finishing boot.</string>
+    <string name="android_upgrading_complete">VM13 finishing boot.</string>
 
     <!-- Notification text to tell the user that a heavy-weight application is running. -->
     <string name="heavy_weight_notification"><xliff:g id="app">%1$s</xliff:g> running</string>
@@ -4109,4 +4109,13 @@
         <item quantity="one"><xliff:g id="count" example="1">%1$d</xliff:g> selected</item>
         <item quantity="other"><xliff:g id="count" example="3">%1$d</xliff:g> selected</item>
     </plurals>
+
+    <!-- Used to replace a range of characters in text that is too wide
+         for the space allocated to it (three dots). -->
+    <string name="ellipsis">\u2026</string>
+
+    <!-- Used to replace a range of characters in text that is too wide
+         for the space allocated to it (two dots). -->
+    <string name="ellipsis_two_dots">\u2025</string>
+
 </resources>

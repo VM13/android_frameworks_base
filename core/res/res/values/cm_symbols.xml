@@ -26,7 +26,29 @@
     -->
     <!-- External CM specific core services -->
     <java-symbol type="array" name="config_externalCMServices" />
-        <!-- LiveDisplay -->
+
+    <java-symbol type="bool" name="config_singleStageCameraKey" />
+    <java-symbol type="integer" name="config_longPressOnMenuBehavior" />
+    <java-symbol type="integer" name="config_longPressOnAppSwitchBehavior" />
+
+    <!-- Notification and battery light -->
+    <java-symbol type="bool" name="config_adjustableNotificationLedBrightness" />
+    <java-symbol type="bool" name="config_intrusiveNotificationLed" />
+    <java-symbol type="bool" name="config_multiColorNotificationLed" />
+    <java-symbol type="bool" name="config_intrusiveBatteryLed" />
+    <java-symbol type="bool" name="config_multiColorBatteryLed" />
+    <java-symbol type="bool" name="config_multipleNotificationLeds" />
+    <java-symbol type="array" name="notification_light_package_mapping" />
+    <java-symbol type="array" name="config_notificationNoAlertsVibePattern" />
+
+    <!-- Package Manager -->
+    <java-symbol type="array" name="config_disabledComponents" />
+    <java-symbol type="array" name="config_forceEnabledComponents" />
+
+    <java-symbol type="string" name="global_action_current_user" />
+    <java-symbol type="dimen" name="global_actions_avatar_size" />
+
+    <!-- LiveDisplay -->
     <java-symbol type="string" name="live_display_title" />
     <java-symbol type="string" name="live_display_hint" />
     <java-symbol type="string" name="live_display_auto" />
@@ -45,4 +67,52 @@
     <java-symbol type="integer" name="config_dayColorTemperature" />
     <java-symbol type="integer" name="config_nightColorTemperature" />
     <java-symbol type="integer" name="config_outdoorAmbientLux" />
+
+    <!-- Theme install failure notification -->
+    <java-symbol type="string" name="theme_install_error_title" />
+    <java-symbol type="string" name="theme_install_error_message" />
+
+    <!-- Stylus gestures -->
+    <java-symbol type="bool" name="config_stylusGestures" />
+    <java-symbol type="string" name="stylus_app_not_installed" />
+
+    <!-- Theme reset notification -->
+    <java-symbol type="string" name="theme_reset_notification_title" />
+    <java-symbol type="string" name="theme_reset_notification_body" />
+
+    <!-- global actions (zen mode buttons) -->
+    <java-symbol type="id" name="option4" />
+
+    <!-- LED pulse -->
+    <java-symbol type="bool" name="config_ledCanPulse" />
+
+    <!-- Non-themeable packages -->
+    <java-symbol type="array" name="non_themeable_packages" />
+
+    <!-- Wifi AP Disabled from Subscription change -->
+    <java-symbol type="string" name="subscription_change_disabled_wifi_ap" />
+
+    <!-- WiFi turn off notification -->
+    <java-symbol type="string" name="notify_turn_wifi_off_title" />
+
+    <!-- Region locked prebundled packages (per mcc) -->
+    <java-symbol type="array" name="config_region_locked_packages" />
+
+    <!-- Packages in this list should be a union of all packages defined in values-mccxxx (mcc) -->
+    <java-symbol type="array" name="config_restrict_to_region_locked_devices" />
+
+    <!-- Support Samsung docks -->
+    <java-symbol type="bool" name="config_forceAnalogCarDock" />
+    <java-symbol type="bool" name="config_forceAnalogDeskDock" />
+
+    <!-- Privacy Guard -->
+    <java-symbol type="drawable" name="stat_notify_privacy_guard" />
+    <java-symbol type="string" name="privacy_guard_notification" />
+    <java-symbol type="string" name="privacy_guard_notification_detail" />
+    <java-symbol type="string" name="privacy_guard_dialog_title" />
+    <java-symbol type="string" name="privacy_guard_dialog_summary" />
+
+    <!-- Blur effects -->
+    <java-symbol type="bool" name="config_ui_blur_enabled" />
+
 </resources>

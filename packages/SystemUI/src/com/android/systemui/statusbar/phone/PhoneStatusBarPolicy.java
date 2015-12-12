@@ -26,12 +26,15 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.UserInfo;
+import android.database.ContentObserver;
 import android.media.AudioManager;
+import android.net.Uri;
 import android.os.Handler;
 import android.os.IRemoteCallback;
 import android.os.RemoteException;
 import android.os.UserHandle;
 import android.os.UserManager;
+import android.provider.Settings;
 import android.provider.Settings.Global;
 import android.telecom.TelecomManager;
 import android.util.Log;
@@ -46,6 +49,7 @@ import com.android.systemui.statusbar.policy.CastController;
 import com.android.systemui.statusbar.policy.CastController.CastDevice;
 import com.android.systemui.statusbar.policy.HotspotController;
 import com.android.systemui.statusbar.policy.UserInfoController;
+import com.android.systemui.statusbar.policy.SuController;
 
 /**
  * This class contains all of the policy about which icons are installed in the status
@@ -64,6 +68,7 @@ public class PhoneStatusBarPolicy implements Callback {
     private static final String SLOT_VOLUME = "volume";
     private static final String SLOT_ALARM_CLOCK = "alarm_clock";
     private static final String SLOT_MANAGED_PROFILE = "managed_profile";
+    private static final String SLOT_SU = "su";
 
     private final Context mContext;
     private final StatusBarManager mService;
@@ -72,6 +77,9 @@ public class PhoneStatusBarPolicy implements Callback {
     private final HotspotController mHotspot;
     private final AlarmManager mAlarmManager;
     private final UserInfoController mUserInfoController;
+    private boolean mAlarmIconVisible;
+    private final SuController mSuController;
+    private boolean mSuIndicatorVisible;
 
     // Assume it's all good unless we hear otherwise.  We don't always seem
     // to get broadcasts that it *is* there.
@@ -110,7 +118,7 @@ public class PhoneStatusBarPolicy implements Callback {
     };
 
     public PhoneStatusBarPolicy(Context context, CastController cast, HotspotController hotspot,
-            UserInfoController userInfoController, BluetoothController bluetooth) {
+            UserInfoController userInfoController, BluetoothController bluetooth, SuController su) {
         mContext = context;
         mCast = cast;
         mHotspot = hotspot;
@@ -119,6 +127,7 @@ public class PhoneStatusBarPolicy implements Callback {
         mService = (StatusBarManager) context.getSystemService(Context.STATUS_BAR_SERVICE);
         mAlarmManager = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
         mUserInfoController = userInfoController;
+        mSuController = su;
 
         // listen for broadcasts
         IntentFilter filter = new IntentFilter();
@@ -167,11 +176,40 @@ public class PhoneStatusBarPolicy implements Callback {
         mService.setIconVisibility(SLOT_HOTSPOT, mHotspot.isHotspotEnabled());
         mHotspot.addCallback(mHotspotCallback);
 
+        // su
+        mService.setIcon(SLOT_SU, R.drawable.stat_sys_su, 0, null);
+        mService.setIconVisibility(SLOT_SU, false);
+        mSuController.addCallback(mSuCallback);
+
         // managed profile
         mService.setIcon(SLOT_MANAGED_PROFILE, R.drawable.stat_sys_managed_profile_status, 0,
                 mContext.getString(R.string.accessibility_managed_profile));
         mService.setIconVisibility(SLOT_MANAGED_PROFILE, false);
+        mSettingsObserver.onChange(true);
+        mContext.getContentResolver().registerContentObserver(
+                Settings.System.getUriFor(Settings.System.SHOW_ALARM_ICON),
+                false, mSettingsObserver);
+        mContext.getContentResolver().registerContentObserver(
+                Settings.System.getUriFor(Settings.System.SHOW_SU_INDICATOR),
+                false, mSettingsObserver);
     }
+
+    private ContentObserver mSettingsObserver = new ContentObserver(null) {
+        @Override
+        public void onChange(boolean selfChange, Uri uri) {
+            mAlarmIconVisible = Settings.System.getInt(mContext.getContentResolver(),
+                    Settings.System.SHOW_ALARM_ICON, 1) == 1;
+            mSuIndicatorVisible = Settings.System.getInt(mContext.getContentResolver(),	
+                    Settings.System.SHOW_SU_INDICATOR, 1) == 1;
+             updateAlarm();
+            updateSu();
+        }
+
+        @Override
+        public void onChange(boolean selfChange) {
+            onChange(selfChange, null);
+        }
+    };
 
     public void setZenMode(int zen) {
         mZen = zen;
@@ -184,7 +222,7 @@ public class PhoneStatusBarPolicy implements Callback {
         final boolean zenNone = mZen == Global.ZEN_MODE_NO_INTERRUPTIONS;
         mService.setIcon(SLOT_ALARM_CLOCK, zenNone ? R.drawable.stat_sys_alarm_dim
                 : R.drawable.stat_sys_alarm, 0, null);
-        mService.setIconVisibility(SLOT_ALARM_CLOCK, mCurrentUserSetup && hasAlarm);
+        mService.setIconVisibility(SLOT_ALARM_CLOCK, mCurrentUserSetup && hasAlarm && mAlarmIconVisible);
     }
 
     private final void updateSimState(Intent intent) {
@@ -390,6 +428,11 @@ public class PhoneStatusBarPolicy implements Callback {
         }
     };
 
+    private void updateSu() {
+         mService.setIconVisibility(SLOT_SU, mSuController.hasActiveSessions() && mSuIndicatorVisible
+);
+    }
+
     private final CastController.Callback mCastCallback = new CastController.Callback() {
         @Override
         public void onCastDevicesChanged() {
@@ -411,4 +454,12 @@ public class PhoneStatusBarPolicy implements Callback {
         mCurrentUserSetup = userSetup;
         updateAlarm();
     }
+
+    private final SuController.Callback mSuCallback = new SuController.Callback() {
+        @Override
+        public void onSuSessionsChanged() {
+            updateSu();
+        }
+    };
+
 }

@@ -23,6 +23,7 @@ import android.content.Intent;
 import android.content.pm.ActivityInfo;
 import android.content.pm.IPackageManager;
 import android.content.pm.PackageManager;
+import android.content.res.ThemeConfig;
 import android.content.res.XmlResourceParser;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
@@ -40,6 +41,7 @@ import android.os.UserHandle;
 import android.provider.Settings;
 import android.provider.Settings.Global;
 import android.provider.Settings.Secure;
+import android.telephony.TelephonyManager;
 import android.text.TextUtils;
 import android.util.Log;
 
@@ -56,6 +58,7 @@ import org.xmlpull.v1.XmlPullParserException;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -1555,6 +1558,12 @@ class DatabaseHelper extends SQLiteOpenHelper {
                             + " VALUES(?,?);");
                     loadStringSetting(stmt, Settings.Global.WIRELESS_CHARGING_STARTED_SOUND,
                             R.string.def_wireless_charging_started_sound);
+                    loadBooleanSetting(stmt, Settings.Global.POWER_NOTIFICATIONS_ENABLED,
+                            R.bool.def_power_notifications_enabled);
+                    loadBooleanSetting(stmt, Settings.Global.POWER_NOTIFICATIONS_VIBRATE,
+                            R.bool.def_power_notifications_vibrate);
+                    loadStringSetting(stmt, Settings.Global.POWER_NOTIFICATIONS_RINGTONE,
+                            R.string.def_power_notifications_ringtone);
                     db.setTransactionSuccessful();
                 } finally {
                     db.endTransaction();
@@ -1701,8 +1710,6 @@ class DatabaseHelper extends SQLiteOpenHelper {
                             + " VALUES(?,?);");
                     loadBooleanSetting(stmt, Settings.Global.GUEST_USER_ENABLED,
                             R.bool.def_guest_user_enabled);
-                    loadSetting(stmt, Settings.Global.ENHANCED_4G_MODE_ENABLED,
-                     ImsConfig.FeatureValueConstants.ON);
                     db.setTransactionSuccessful();
                 } finally {
                     db.endTransaction();
@@ -2342,6 +2349,16 @@ class DatabaseHelper extends SQLiteOpenHelper {
         }
     }
 
+    private void loadProtectedSmsSetting(SQLiteStatement stmt) {
+        String[] regAddresses = mContext.getResources()
+                .getStringArray(R.array.def_protected_sms_list_values);
+        if (regAddresses.length > 0) {
+            loadSetting(stmt,
+                    Settings.Secure.PROTECTED_SMS_ADDRESSES,
+                    TextUtils.join("|", regAddresses));
+        }
+    }
+
     private void loadSettings(SQLiteDatabase db) {
         loadSystemSettings(db);
         loadSecureSettings(db);
@@ -2381,6 +2398,9 @@ class DatabaseHelper extends SQLiteOpenHelper {
 
             loadBooleanSetting(stmt, Settings.System.ACCELEROMETER_ROTATION,
                     R.bool.def_accelerometer_rotation);
+
+            loadIntegerSetting(stmt, Settings.System.ACCELEROMETER_ROTATION_ANGLES,
+                    R.integer.def_accelerometer_rotation_angles);
 
             loadDefaultHapticSettings(stmt);
 
@@ -2689,13 +2709,37 @@ class DatabaseHelper extends SQLiteOpenHelper {
 
             // Set the preferred network mode to target desired value or Default
             // value defined in RILConstants
-            int type;
-            type = RILConstants.PREFERRED_NETWORK_MODE;
-            loadSetting(stmt, Settings.Global.PREFERRED_NETWORK_MODE, type);
+            int phoneCount = TelephonyManager.getDefault().getPhoneCount();
+            final String defVal = SystemProperties.get("ro.telephony.default_network", "");
+            final String[] defNetworkSettings = defVal.split(",");
+            final String[] networkSettings = new String[phoneCount];
+            boolean error = defNetworkSettings.length != phoneCount;
+
+            for (int i = 0; i < phoneCount; i++) {
+                if (i < defNetworkSettings.length) {
+                    try {
+                        networkSettings[i] = String.valueOf(
+                                Integer.parseInt(defNetworkSettings[i]));
+                    } catch (NumberFormatException ex) {
+                        networkSettings[i] = String.valueOf(RILConstants.PREFERRED_NETWORK_MODE);
+                        error = true;
+                    }
+                } else {
+                    networkSettings[i] = String.valueOf(RILConstants.PREFERRED_NETWORK_MODE);
+                    error = true;
+                }
+            }
+
+            if (error) {
+                Log.w(TAG, "Invalid ro.telephony.default_network: " + defVal);
+            }
+
+            loadSetting(stmt, Settings.Global.PREFERRED_NETWORK_MODE, TextUtils.join(",",
+                    networkSettings));
 
             // Set the preferred cdma subscription source to target desired value or default
             // value defined in CdmaSubscriptionSourceManager
-            type = SystemProperties.getInt("ro.telephony.default_cdma_sub",
+            int type = SystemProperties.getInt("ro.telephony.default_cdma_sub",
                         CdmaSubscriptionSourceManager.PREFERRED_CDMA_SUBSCRIPTION);
             loadSetting(stmt, Settings.Global.CDMA_SUBSCRIPTION_MODE, type);
 
@@ -2710,14 +2754,13 @@ class DatabaseHelper extends SQLiteOpenHelper {
 
             loadSetting(stmt, Settings.Global.DEVICE_NAME, getDefaultDeviceName());
 
+            loadIntegerSetting(stmt, Settings.Global.SEND_ACTION_APP_ERROR,
+                    R.integer.def_send_action_app_error);
+
             loadBooleanSetting(stmt, Settings.Global.GUEST_USER_ENABLED,
                     R.bool.def_guest_user_enabled);
-
             loadSetting(stmt, Settings.Global.ENHANCED_4G_MODE_ENABLED,
                     ImsConfig.FeatureValueConstants.ON);
-
-            loadIntegerSetting(stmt, Settings.Global.TETHER_DUN_REQUIRED,
-                    R.integer.def_tether_dun_required); 
 
             /*
              * IMPORTANT: Do not add any more upgrade steps here as the global,

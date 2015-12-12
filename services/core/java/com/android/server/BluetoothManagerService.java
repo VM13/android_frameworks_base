@@ -1,4 +1,7 @@
 /*
+ * Copyright (c) 2013-2014, The Linux Foundation. All rights reserved.
+ * Not a Contribution.
+ *
  * Copyright (C) 2012 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -18,6 +21,7 @@ package com.android.server;
 
 import android.Manifest;
 import android.app.ActivityManager;
+import android.app.AppOpsManager;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothProfile;
@@ -619,7 +623,7 @@ class BluetoothManagerService extends IBluetoothManager.Stub {
         return true;
 
     }
-    public boolean enable() {
+    public boolean enable(String callingPackage) {
         if ((Binder.getCallingUid() != Process.SYSTEM_UID) &&
             (!checkIfCallerIsForegroundUser())) {
             Log.w(TAG,"enable(): not allowed for non-active and non system user");
@@ -632,6 +636,13 @@ class BluetoothManagerService extends IBluetoothManager.Stub {
             Log.d(TAG,"enable():  mBluetooth =" + mBluetooth +
                     " mBinding = " + mBinding);
         }
+
+        AppOpsManager appOps = (AppOpsManager) mContext
+                .getSystemService(Context.APP_OPS_SERVICE);
+        int callingUid = Binder.getCallingUid();
+        if (appOps.noteOp(AppOpsManager.OP_BLUETOOTH_CHANGE, callingUid,
+                callingPackage) != AppOpsManager.MODE_ALLOWED)
+            return false;
 
         synchronized(mReceiver) {
             mQuietEnableExternal = false;
@@ -1483,7 +1494,7 @@ class BluetoothManagerService extends IBluetoothManager.Stub {
                             mState = BluetoothAdapter.STATE_TURNING_ON;
                         }
 
-                        waitForOnOff(true, false);
+                        waitForMonitoredOnOff(true, false);
 
                         if (mState == BluetoothAdapter.STATE_TURNING_ON) {
                             bluetoothStateChangeHandler(mState, BluetoothAdapter.STATE_ON);
@@ -1496,7 +1507,7 @@ class BluetoothManagerService extends IBluetoothManager.Stub {
                         bluetoothStateChangeHandler(BluetoothAdapter.STATE_ON,
                                                     BluetoothAdapter.STATE_TURNING_OFF);
 
-                        waitForOnOff(false, true);
+                        waitForMonitoredOnOff(false, true);
 
                         bluetoothStateChangeHandler(BluetoothAdapter.STATE_TURNING_OFF,
                                                     BluetoothAdapter.STATE_OFF);
@@ -1722,10 +1733,19 @@ class BluetoothManagerService extends IBluetoothManager.Stub {
                 sendBleStateChanged(prevState, newState);
             }
 
+            if( newState == BluetoothAdapter.STATE_TURNING_ON
+               && prevState == BluetoothAdapter.STATE_BLE_ON) {
+                mEnable = true;
+            }
+
             if (isStandardBroadcast) {
                 if (prevState == BluetoothAdapter.STATE_BLE_ON) {
                     // Show prevState of BLE_ON as OFF to standard users
                     prevState = BluetoothAdapter.STATE_OFF;
+                }
+                else if (prevState == BluetoothAdapter.STATE_BLE_TURNING_OFF) {
+                    // show prevState to TURNING_OFF
+                    prevState = BluetoothAdapter.STATE_TURNING_OFF;
                 }
                 Intent intent = new Intent(BluetoothAdapter.ACTION_STATE_CHANGED);
                 intent.putExtra(BluetoothAdapter.EXTRA_PREVIOUS_STATE, prevState);
@@ -1762,6 +1782,48 @@ class BluetoothManagerService extends IBluetoothManager.Stub {
             }
             if (on || off) {
                 SystemClock.sleep(300);
+            } else {
+                SystemClock.sleep(50);
+            }
+            i++;
+        }
+        Log.e(TAG,"waitForOnOff time out");
+        return false;
+    }
+
+    /**
+     *  if on is true, wait for state become ON
+     *  if off is true, wait for state become OFF
+     *  if both on and off are false, wait for state not ON
+     */
+    private boolean waitForMonitoredOnOff(boolean on, boolean off) {
+        int i = 0;
+        while (i < 10) {
+            synchronized(mConnection) {
+                try {
+                    if (mBluetooth == null) break;
+                    if (on) {
+                        if (mBluetooth.getState() == BluetoothAdapter.STATE_ON) return true;
+                        if (mBluetooth.getState() == BluetoothAdapter.STATE_BLE_ON) {
+                            bluetoothStateChangeHandler(BluetoothAdapter.STATE_BLE_TURNING_ON,
+                                                        BluetoothAdapter.STATE_BLE_ON);
+                        }
+                    } else if (off) {
+                        if (mBluetooth.getState() == BluetoothAdapter.STATE_OFF) return true;
+                        if (mBluetooth.getState() == BluetoothAdapter.STATE_BLE_ON) {
+                            bluetoothStateChangeHandler(BluetoothAdapter.STATE_TURNING_OFF,
+                                                        BluetoothAdapter.STATE_BLE_ON);
+                        }
+                    } else {
+                        if (mBluetooth.getState() != BluetoothAdapter.STATE_ON) return true;
+                    }
+                } catch (RemoteException e) {
+                    Log.e(TAG, "getState()", e);
+                    break;
+                }
+            }
+            if (on || off) {
+                SystemClock.sleep(800);
             } else {
                 SystemClock.sleep(50);
             }

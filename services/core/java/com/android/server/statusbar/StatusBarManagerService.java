@@ -176,6 +176,16 @@ public class StatusBarManagerService extends IStatusBarService.Stub {
                 }
             }
         }
+
+        @Override
+        public void onCameraLaunchGestureDetected(int source) {
+            if (mBar != null) {
+                try {
+                    mBar.onCameraLaunchGestureDetected(source);
+                } catch (RemoteException e) {
+                }
+            }
+        }
     };
 
     // ================================================================================
@@ -542,6 +552,15 @@ public class StatusBarManagerService extends IStatusBarService.Stub {
         if (mBar != null) {
             try {
                 mBar.startAssist(args);
+            } catch (RemoteException ex) {}
+        }
+    }
+
+    @Override
+    public void setAutoRotate(boolean enabled) {
+        if (mBar != null) {
+            try {
+                mBar.setAutoRotate(enabled);
             } catch (RemoteException ex) {}
         }
     }

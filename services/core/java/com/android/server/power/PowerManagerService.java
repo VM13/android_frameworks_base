@@ -171,12 +171,12 @@ public final class PowerManagerService extends SystemService
     // Power features defined in hardware/libhardware/include/hardware/power.h.
     private static final int POWER_FEATURE_DOUBLE_TAP_TO_WAKE = 1;
 
-    private static final int DEFAULT_BUTTON_ON_DURATION = 5 * 1000;
+    private static final int DEFAULT_BUTTON_ON_DURATION = 2 * 1000;
 
     // Default setting for double tap to wake.
     private static final int DEFAULT_DOUBLE_TAP_TO_WAKE = 0;
 
-    private static final int BUTTON_ON_DURATION = 5 * 1000;
+    private static final int BUTTON_ON_DURATION = 2 * 1000;
 
     private static final float PROXIMITY_NEAR_THRESHOLD = 5.0f;
 
@@ -689,8 +689,8 @@ public final class PowerManagerService extends SystemService
             resolver.registerContentObserver(Settings.Secure.getUriFor(
                     Settings.Secure.KEYBOARD_BRIGHTNESS),
                     false, mSettingsObserver, UserHandle.USER_ALL);
-            resolver.registerContentObserver(Settings.Secure.getUriFor(
-                    Settings.Secure.BUTTON_BACKLIGHT_TIMEOUT),
+            resolver.registerContentObserver(CMSettings.Secure.getUriFor(
+                    CMSettings.Secure.BUTTON_BACKLIGHT_TIMEOUT),
                     false, mSettingsObserver, UserHandle.USER_ALL);
             resolver.registerContentObserver(CMSettings.System.getUriFor(
                     CMSettings.System.PROXIMITY_ON_WAKE),
@@ -845,9 +845,9 @@ public final class PowerManagerService extends SystemService
             updateLowPowerModeLocked();
         }
 
-        mButtonTimeout = Settings.Secure.getIntForUser(resolver,
-                Settings.Secure.BUTTON_BACKLIGHT_TIMEOUT,
-                DEFAULT_BUTTON_ON_DURATION, UserHandle.USER_CURRENT);
+        mButtonTimeout = CMSettings.Secure.getIntForUser(resolver,
+                CMSettings.Secure.BUTTON_BACKLIGHT_TIMEOUT,
+                BUTTON_ON_DURATION, UserHandle.USER_CURRENT);
 
         mButtonBrightness = Settings.Secure.getIntForUser(resolver,
                 Settings.Secure.BUTTON_BRIGHTNESS, mButtonBrightnessSettingDefault,
@@ -1700,10 +1700,16 @@ public final class PowerManagerService extends SystemService
                 final int screenDimDuration = getScreenDimDurationLocked(screenOffTimeout);
 
                 mUserActivitySummary = 0;
-                if (mLastUserActivityTime >= mLastWakeTime) {
+                if (mWakefulness == WAKEFULNESS_AWAKE && mLastUserActivityTime >= mLastWakeTime) {
                     nextTimeout = mLastUserActivityTime
                             + screenOffTimeout - screenDimDuration;
                     if (now < nextTimeout) {
+                        if (now > mLastUserActivityTime + BUTTON_ON_DURATION) {
+                            mButtonsLight.setBrightness(0);
+                        } else {
+                            mButtonsLight.setBrightness(mDisplayPowerRequest.screenBrightness);
+                            nextTimeout = now + BUTTON_ON_DURATION;
+                        }
                         mUserActivitySummary = USER_ACTIVITY_SCREEN_BRIGHT;
                         if (mWakefulness == WAKEFULNESS_AWAKE) {
                             int buttonBrightness, keyboardBrightness;

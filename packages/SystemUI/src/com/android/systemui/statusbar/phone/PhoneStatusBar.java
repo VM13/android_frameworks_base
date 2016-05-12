@@ -136,6 +136,7 @@ import com.android.systemui.cm.UserContentObserver;
 import com.android.systemui.doze.DozeHost;
 import com.android.systemui.doze.DozeLog;
 import com.android.systemui.keyguard.KeyguardViewMediator;
+import com.android.systemui.omni.StatusBarHeaderMachine;
 import com.android.systemui.qs.QSPanel;
 import com.android.systemui.recents.ScreenPinningRequest;
 import com.android.systemui.settings.BrightnessController;
@@ -369,6 +370,8 @@ public class PhoneStatusBar extends BaseStatusBar implements DemoMode,
 
     boolean mExpandedVisible;
 
+    private int mDt2lTargetVibrateConfig;
+
     private int mNavigationBarWindowState = WINDOW_STATE_SHOWING;
 
     private int mStatusBarHeaderHeight;
@@ -458,6 +461,8 @@ public class PhoneStatusBar extends BaseStatusBar implements DemoMode,
                     Settings.System.NAVBAR_LEFT_IN_LANDSCAPE), false, this, UserHandle.USER_ALL);
             resolver.registerContentObserver(CMSettings.System.getUriFor(
                     CMSettings.Secure.RECENTS_LONG_PRESS_ACTIVITY), false, this);
+            resolver.registerContentObserver(Settings.System.getUriFor(
+                    Settings.System.DT2L_TARGET_VIBRATE_CONFIG), false, this, UserHandle.USER_ALL);
             update();
         }
 
@@ -479,6 +484,9 @@ public class PhoneStatusBar extends BaseStatusBar implements DemoMode,
             mBrightnessControl = Settings.System.getIntForUser(
                     resolver, Settings.System.STATUS_BAR_BRIGHTNESS_CONTROL, 0,
                     UserHandle.USER_CURRENT) == 1;
+
+            mDt2lTargetVibrateConfig = Settings.System.getIntForUser(resolver,
+                    Settings.System.DT2L_TARGET_VIBRATE_CONFIG, 1, mCurrentUserId);
 
             if (mNavigationBarView != null) {
                 boolean navLeftInLandscape = Settings.System.getIntForUser(resolver,
@@ -588,6 +596,8 @@ public class PhoneStatusBar extends BaseStatusBar implements DemoMode,
     private boolean mAutohideSuspended;
     private int mStatusBarMode;
     private int mNavigationBarMode;
+
+    private StatusBarHeaderMachine mStatusBarHeaderMachine;
 
     private ViewMediatorCallback mKeyguardViewMediatorCallback;
     private ScrimController mScrimController;
@@ -794,7 +804,7 @@ public class PhoneStatusBar extends BaseStatusBar implements DemoMode,
         if (currentTheme != null) {
             mCurrentTheme = (ThemeConfig)currentTheme.clone();
         } else {
-            mCurrentTheme = ThemeConfig.getSystemTheme();
+            mCurrentTheme = ThemeConfig.getBootTheme(mContext.getContentResolver());
         }
 
         mStatusBarWindow = new StatusBarWindowView(mContext, null);
@@ -1189,6 +1199,9 @@ public class PhoneStatusBar extends BaseStatusBar implements DemoMode,
         // Private API call to make the shadows look better for Recents
         ThreadedRenderer.overrideProperty("ambientRatio", String.valueOf(1.5f));
 
+        mStatusBarHeaderMachine = new StatusBarHeaderMachine(mContext);
+        mStatusBarHeaderMachine.addObserver(mHeader);
+        mStatusBarHeaderMachine.updateEnablement();
         return mStatusBarView;
     }
 
@@ -1429,7 +1442,7 @@ public class PhoneStatusBar extends BaseStatusBar implements DemoMode,
     }
 
     private Resources getNavbarThemedResources() {
-        String pkgName = mCurrentTheme.getOverlayPkgNameForApp(ThemeConfig.SYSTEMUI_NAVBAR_PKG);
+        String pkgName = mCurrentTheme.getOverlayForNavBar();
         Resources res = null;
         try {
             res = mContext.getPackageManager().getThemedResourcesForApplication(
@@ -3353,6 +3366,11 @@ public class PhoneStatusBar extends BaseStatusBar implements DemoMode,
             }
             else if (Intent.ACTION_SCREEN_ON.equals(action)) {
                 notifyNavigationBarScreenOn(true);
+            } else if (Intent.ACTION_KEYGUARD_WALLPAPER_CHANGED.equals(action)) {
+                WallpaperManager wm = (WallpaperManager) mContext.getSystemService(
+                        Context.WALLPAPER_SERVICE);
+                mKeyguardWallpaper = wm.getKeyguardBitmap();
+                updateMediaMetaData(true);
             }
         }
     };
@@ -3541,9 +3559,6 @@ public class PhoneStatusBar extends BaseStatusBar implements DemoMode,
 
         makeStatusBarView();
         repositionNavigationBar();
-        if (mNavigationBarView != null) {
-            mNavigationBarView.updateResources(getNavbarThemedResources());
-        }
 
         // recreate StatusBarIconViews.
         /*
@@ -3611,6 +3626,7 @@ public class PhoneStatusBar extends BaseStatusBar implements DemoMode,
         // detect theme change.
         ThemeConfig newTheme = newConfig != null ? newConfig.themeConfig : null;
         final boolean updateStatusBar = shouldUpdateStatusbar(mCurrentTheme, newTheme);
+        final boolean updateNavBar = shouldUpdateNavbar(mCurrentTheme, newTheme); 
         if (newTheme != null) mCurrentTheme = (ThemeConfig) newTheme.clone();
         if (updateStatusBar) {
             mContext.recreateTheme();
@@ -3633,7 +3649,7 @@ public class PhoneStatusBar extends BaseStatusBar implements DemoMode,
             mBrightnessMirrorController.updateResources();
         }
 
-        if (mNavigationBarView != null)  {
+        if (mNavigationBarView != null && updateNavBar)  {
             mNavigationBarView.updateResources(getNavbarThemedResources());
         }
     }
@@ -3660,6 +3676,25 @@ public class PhoneStatusBar extends BaseStatusBar implements DemoMode,
                 (fonts != null && !fonts.equals(oldTheme.getFontPkgName())) ||
                 (icons != null && !icons.equals(oldTheme.getIconPackPkgName())) ||
                 newTheme.getLastThemeChangeRequestType() == RequestType.THEME_UPDATED);
+    }
+
+    /**
+     * Determines if we need to update the navbar resources due to a theme change.  We currently
+     * check if the overlay for the navbar, or request type is {@link RequestType.THEME_UPDATED}.
+     *
+     * @param oldTheme
+     * @param newTheme
+     * @return True if we should update the navbar
+     */
+    private boolean shouldUpdateNavbar(ThemeConfig oldTheme, ThemeConfig newTheme) {
+        // no newTheme, so no need to update navbar
+        if (newTheme == null) return false;
+
+        final String overlay = newTheme.getOverlayForNavBar();
+
+        return oldTheme == null ||
+                (overlay != null && !overlay.equals(oldTheme.getOverlayForNavBar()) ||
+                        newTheme.getLastThemeChangeRequestType() == RequestType.THEME_UPDATED);
     }
 
     protected void loadDimens() {
@@ -4573,8 +4608,7 @@ public class PhoneStatusBar extends BaseStatusBar implements DemoMode,
     }
 
     private void vibrateForCameraGesture() {
-        // Make sure to pass -1 for repeat so VibratorService doesn't stop us when going to sleep.
-        mVibrator.vibrate(new long[] { 0, 250L }, -1 /* repeat */);
+        mVibrator.vibrate(new long[] { 0, mDt2lTargetVibrateConfig }, -1 /* repeat */);
     }
 
     public void onScreenTurnedOn() {

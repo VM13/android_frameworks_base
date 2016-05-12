@@ -270,6 +270,8 @@ public interface MetricsConstants {
     public static final int QS_VOLUME = 243; 
     public static final int QS_SCREEN_TIMEOUT = 244;
     public static final int QS_PROFILES = 245; 
+    public static final int QS_THEMES = 246; 
+    public static final int QS_IME = 247; 
 
     // Lock screen weather settings
     public static final int LOCKSCREEN_WEATHER_SETTINGS = 248;

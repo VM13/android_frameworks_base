@@ -23,7 +23,7 @@
 
     <!-- The available QuickSettings tiles -->
     <string name="quick_settings_tiles_available" translatable="false">
-        wifi,bt,inversion,dnd,cell,airplane,rotation,flashlight,location,cast,hotspot,brightness,screenOff,screenshot,volume,expanded_desktop,screen_timeout,profiles,nfc,sync,reboot,music,compass,battery_saver
+        wifi,bt,inversion,dnd,cell,airplane,rotation,flashlight,location,cast,hotspot,brightness,screenOff,screenshot,volume,expanded_desktop,screen_timeout,profiles,nfc,sync,reboot,music,compass,battery_saver,themes,ime,sound
     </string>
 
 </resources>

@@ -17,7 +17,7 @@
 
 <resources>
     <!-- DO NOT TRANSLATE - temporary hack to show the speed-less label if no translation is available -->
-    <item type="string" name="keyguard_indication_charging_time_fast_if_translated">@string/keyguard_indication_charging_time_fast</item>
+    <!-- item type="string" name="keyguard_indication_charging_time_fast_if_translated">@string/keyguard_indication_charging_time_fast</item -->
     <!-- DO NOT TRANSLATE - temporary hack to show the speed-less label if no translation is available -->
-    <item type="string" name="keyguard_indication_charging_time_slowly_if_translated">@string/keyguard_indication_charging_time_slowly</item>
+    <!-- item type="string" name="keyguard_indication_charging_time_slowly_if_translated">@string/keyguard_indication_charging_time_slowly</item -->
 </resources>

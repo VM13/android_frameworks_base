@@ -142,6 +142,7 @@ public class QsTuner extends Fragment implements Callback {
             @Override
             public void onDrop(String sourceText) {
                 mTileHost.remove(sourceText);
+                mQsPanel.refreshAllTiles();
             }
         });
     }
@@ -186,6 +187,7 @@ public class QsTuner extends Fragment implements Callback {
     @Override
     public void onTilesChanged() {
         mQsPanel.setTiles(mTileHost.getTiles());
+        mQsPanel.refreshAllTiles();
     }
 
     private static int getLabelResource(String spec) {
@@ -205,13 +207,17 @@ public class QsTuner extends Fragment implements Callback {
         else if (spec.equals("screenshot")) return R.string.quick_settings_screenshot_label;
         else if (spec.equals("volume")) return R.string.quick_settings_volume_panel_label;
         else if (spec.equals("expanded_desktop")) return R.string.quick_settings_expanded_desktop_label;
+        else if (spec.equals("themes")) return R.string.quick_settings_themes;
+        else if (spec.equals("ime")) return R.string.quick_settings_ime_label; 
         else if (spec.equals("screen_timeout")) return R.string.quick_settings_screen_timeout_label;
         else if (spec.equals("profiles")) return R.string.quick_settings_profiles_detail_label;
         else if (spec.equals("nfc")) return R.string.quick_settings_nfc_label;
         else if (spec.equals("sync")) return R.string.quick_settings_sync_label;
         else if (spec.equals("reboot")) return R.string.quick_settings_reboot_label;
         else if (spec.equals("music")) return R.string.quick_settings_music_label;
-        else if (spec.equals("battery_saver")) return R.string.quick_settings_battery_saver; 
+        else if (spec.equals("battery_saver")) return R.string.quick_settings_battery_saver;
+        else if (spec.equals("hw_keys")) return R.string.quick_settings_hwkeys_title; 
+        else if (spec.equals("sound")) return R.string.quick_settings_sound_label;
         return 0;
     }
 
@@ -455,6 +461,8 @@ public class QsTuner extends Fragment implements Callback {
             else if (mSpec.equals("screenshot")) return R.drawable.ic_qs_screenshot;
             else if (mSpec.equals("volume")) return R.drawable.ic_qs_volume_panel;
             else if (mSpec.equals("expanded_desktop")) return R.drawable.ic_qs_expanded_desktop_off;
+            else if (mSpec.equals("themes")) return R.drawable.ic_qs_themes;
+            else if (mSpec.equals("ime")) return R.drawable.ic_qs_ime; 
             else if (mSpec.equals("screen_timeout")) return R.drawable.ic_qs_screen_timeout_vector;
             else if (mSpec.equals("profiles")) return R.drawable.ic_qs_system_profiles; 
             else if (mSpec.equals("nfc")) return R.drawable.ic_qs_nfc_on;
@@ -462,6 +470,7 @@ public class QsTuner extends Fragment implements Callback {
             else if (mSpec.equals("reboot")) return R.drawable.ic_qs_reboot;
             else if (mSpec.equals("music")) return R.drawable.ic_qs_media_play;
             else if (mSpec.equals("battery_saver")) return R.drawable.ic_qs_battery_saver_on;
+            else if (mSpec.equals("sound")) return R.drawable.ic_qs_ringer_audible;
             return R.drawable.android;
         }
 
